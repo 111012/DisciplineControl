@@ -3,7 +3,20 @@
 版本号对应 `app/build.gradle.kts` 的 `versionName` / `versionCode`。
 
 > v0.1.0–v0.2.0 **均已提交**。v0.1.4–v0.1.8 同属提交 `323c556`「v0.1.4-v0.1.8: 真机修复轮（含代码审查发现的 P0/P1）」，v0.2.0 为后续提交。
-> 当前版本 **v0.2.0 / versionCode 10**，产物 `dist/DisciplineControl-v0.2.0-release.apk`（日常用）/ `dist/DisciplineControl-v0.2.0-debug.apk`（调试用）。
+> 当前版本 **v0.2.1 / versionCode 11**，产物 `dist/DisciplineControl-v0.2.1-release.apk`（日常用）/ `dist/DisciplineControl-v0.2.1-debug.apk`（调试用）。
+
+---
+
+## v0.2.1 — 2026-10-19（versionCode 11）
+
+性能与交付工具。
+
+### 变更
+
+- `Engine.nextOpenText` 由"逐分钟扫 14 天（最多 2 万次判断）"改为"只算各时段下一个开始时刻"（O(时段数×14)）；桌面每分钟在主线程调用它，收益在多规则时明显
+- 新增 `scripts/adb-verify.ps1`：一键真机验收（装 debug → 时段外拦截/次数上限/计时提醒/待生效生效/关屏亮屏续接 → PASS/FAIL 汇总 → 清理并装回 release）
+- 新增 `DELIVERY.md`：交付说明（装哪个包、五分钟上手、参数表、验证结果、已知限制、维护命令）
+- 单测 **31 个**（EngineTest 25 + ModelJsonTest 6），新增"下次开放时间"的星期/跨零点/时段内用例
 
 ---
 

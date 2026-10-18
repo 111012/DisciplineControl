@@ -128,6 +128,24 @@ class EngineTest {
         assertEquals("今天 20:00", Engine.nextOpenText(sg, at(19, 30)))
         assertEquals("今天 20:00", Engine.nextOpenText(sg, at(10, 0)))
         assertEquals("明天 20:00", Engine.nextOpenText(sg, at(23, 30)))
+        // 正在时段内：不该说"下次"
+        assertEquals("现在", Engine.nextOpenText(sg, at(21, 0)))
+    }
+
+    @Test
+    fun nextOpenTextWithWeeklyAndCrossMidnight() {
+        // 只有周三 20:00–23:00（2026-10-18 是周日，下一次是 10-21 周三）
+        val wedOnly = sg.copy(windows = listOf(TimeWindow(1 shl 2, 20 * 60, 23 * 60)))
+        assertEquals("周三 20:00", Engine.nextOpenText(wedOnly, at(22, 0, 18)))
+        // 跨零点 22:00–02:00，只在周一：周二 01:00 属于周一那段 → 在时段内
+        val cross = sg.copy(windows = listOf(TimeWindow(1 shl 0, 22 * 60, 2 * 60)))
+        assertEquals("现在", Engine.nextOpenText(cross, at(1, 0, 20)))
+        // 周一 03:00 已结束 → 下一次就是今天（周一）22:00
+        assertEquals("今天 22:00", Engine.nextOpenText(cross, at(3, 0, 19)))
+        // 周一 01:00 不算（属于周日那段，而规则只选周一）→ 今天 22:00
+        assertEquals("今天 22:00", Engine.nextOpenText(cross, at(1, 0, 19)))
+        // 无时段
+        assertEquals("（无可用时段）", Engine.nextOpenText(sg.copy(windows = emptyList()), at(12, 0)))
     }
 
     // ---------------- 放宽判定（决定要不要延后 24 小时生效） ----------------

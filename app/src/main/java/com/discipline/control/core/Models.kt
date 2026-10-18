@@ -360,25 +360,35 @@ object Engine {
         return if (h == 0) "明天 0 点" else "明天 $h 点"
     }
 
-    /** 下一次开放的描述，例如 «今天 20:00» */    fun nextOpenText(rule: AppRule, now: LocalDateTime): String {
+    /**
+     * 下一次开放的描述，例如 «今天 20:00»。
+     * 旧实现从现在起逐分钟扫 14 天（最多 2 万次覆盖判断，而且桌面每分钟在主线程跑一次）；
+     * 改成只检查"各时段的下一个开始时刻"，复杂度降到 O(时段数 × 14)。
+     */
+    fun nextOpenText(rule: AppRule, now: LocalDateTime): String {
         if (rule.windows.isEmpty()) return "（无可用时段）"
-        var t = now.withSecond(0).withNano(0).plusMinutes(1)
-        val names = arrayOf("一", "二", "三", "四", "五", "六", "日")
-        for (i in 0 until 14 * 1440) {
-            if (rule.inWindow(t)) {
-                val diff = ChronoUnit.DAYS.between(now.toLocalDate(), t.toLocalDate())
-                val dayText = when (diff) {
-                    0L -> "今天"
-                    1L -> "明天"
-                    else -> "周" + names[t.dayOfWeek.value - 1]
-                }
-                return dayText + " " + Utils.fmtMin(t.hour * 60 + t.minute)
+        if (rule.inWindow(now)) return "现在"
+        var best: LocalDateTime? = null
+        for (offset in 0..14) {
+            val day = now.toLocalDate().plusDays(offset.toLong())
+            val dayIdx = day.dayOfWeek.value - 1
+            for (w in rule.windows) {
+                if ((w.days and (1 shl dayIdx)) == 0) continue
+                val start = day.atStartOfDay().plusMinutes(w.startMin.toLong())
+                if (!start.isAfter(now)) continue
+                if (best == null || start.isBefore(best)) best = start
             }
-            t = t.plusMinutes(1)
         }
-        return "（无可用时段）"
+        val t = best ?: return "（无可用时段）"
+        val diff = ChronoUnit.DAYS.between(now.toLocalDate(), t.toLocalDate())
+        val names = arrayOf("一", "二", "三", "四", "五", "六", "日")
+        val dayText = when (diff) {
+            0L -> "今天"
+            1L -> "明天"
+            else -> "周" + names[t.dayOfWeek.value - 1]
+        }
+        return dayText + " " + Utils.fmtMin(t.hour * 60 + t.minute)
     }
-
     /** new 是否相对 old 放宽了限制 */
     fun isRelaxation(old: AppRule, new: AppRule): Boolean {
         // 关掉管控 = 完全不受限，属于放宽；重新开启管控 = 收紧，立即生效

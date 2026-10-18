@@ -6,8 +6,8 @@
 - 方案：**自建桌面（Launcher）+ 无障碍前台监听 + 前台计时服务**
 - 包名 `com.discipline.control`，`minSdk 26` / `targetSdk 33`，Kotlin + AGP 7.4.2 + Gradle 7.6.4
 
-> **当前状态**：v0.2.0 已在小米平板 6 上完成真机验证（含 P0 拦截去重回归、关屏亮屏续接、跨 0 点重置），**30 个** JVM 单测全绿。
-> 安装包（固定签名，可互相覆盖升级）：`dist/DisciplineControl-v0.2.0-release.apk`（日常用，2.3 MB，无 debuggable / 无调试广播）与 `dist/DisciplineControl-v0.2.0-debug.apk`（调试用，带 adb 调试广播）
+> **当前状态**：v0.2.1 已在小米平板 6 上完成真机验证（P0 拦截去重回归、关屏亮屏续接、跨 0 点重置），**31 个** JVM 单测全绿。交付速览见 [DELIVERY.md](DELIVERY.md)。
+> 安装包（固定签名，可互相覆盖升级）：`dist/DisciplineControl-v0.2.1-release.apk`（日常用，2.3 MB，无 debuggable / 无调试广播）与 `dist/DisciplineControl-v0.2.1-debug.apk`（调试用，带 adb 调试广播）
 > 首次使用要设 PIN（测试期设的是 `1234`，自己用请改掉：设置 → 修改 PIN）
 > 安装步骤：[docs/平板安装与使用说明.md](docs/平板安装与使用说明.md)
 > 逐项验收：[docs/验收测试清单.md](docs/验收测试清单.md)
@@ -110,7 +110,7 @@ cd D:\DSH_WorkSpace\DisciplineControl
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`（同时拷到 `dist/`）
 
-单元测试（纯 JVM，不需要真机，覆盖时段边界、次数/时长判定、跨零点、放宽判断、会话续接、跨天记账、JSON 往返等 30 个用例：`EngineTest` 24 + `ModelJsonTest` 6，v0.1.8 全绿）：
+单元测试（纯 JVM，不需要真机，覆盖时段边界、次数/时长判定、跨零点、放宽判断、会话续接、跨天记账、JSON 往返等 31 个用例：`EngineTest` 25 + `ModelJsonTest` 6，v0.1.8 全绿）：
 
 ```powershell
 .\.toolchain\gradle-7.6.4\bin\gradle.bat :app:testDebugUnitTest --no-daemon
@@ -202,7 +202,7 @@ adb shell am broadcast -a com.discipline.control.DEBUG -e cmd clear
 | 机型 | 小米平板 6（Xiaomi Pad 6），型号 23043RP34C |
 | 系统 | Android 13 / MIUI V140 |
 | 屏幕 | 1800×2880（横屏 2880×1800），密度 400 |
-| 安装包 | `dist/DisciplineControl-v0.2.0-release.apk`（日常）/ `-debug.apk`（调试，versionCode 10） |
+| 安装包 | `dist/DisciplineControl-v0.2.1-release.apk`（日常）/ `-debug.apk`（调试，versionCode 11） |
 
 > 早期文档按「小米平板 5」编写，实际验证机是 Pad 6；Pad 5 未实测。
 
