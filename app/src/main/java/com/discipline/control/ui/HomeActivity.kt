@@ -134,6 +134,7 @@ class HomeActivity : AppCompatActivity() {
             }
         }
         adapter.setData(visible)
+        android.util.Log.i("DC/Home", "refresh visible=${visible.size} hidden=${all.size - visible.size}")
         rebuildStatus(rules, day, now)
         rebuildChips()
         rebuildFooter()

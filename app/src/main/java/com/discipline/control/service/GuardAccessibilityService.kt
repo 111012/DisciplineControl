@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
 import android.provider.Settings
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 
 /**
@@ -13,6 +14,8 @@ import android.view.accessibility.AccessibilityEvent
 class GuardAccessibilityService : AccessibilityService() {
 
     companion object {
+        private const val TAG = "DC/A11y"
+
         @Volatile
         var instance: GuardAccessibilityService? = null
             private set
@@ -43,10 +46,12 @@ class GuardAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        Log.i(TAG, "accessibility connected")
         GuardService.startSafely(this)
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "accessibility destroyed")
         instance = null
         super.onDestroy()
     }
@@ -59,6 +64,7 @@ class GuardAccessibilityService : AccessibilityService() {
         // 无障碍服务是系统绑定的，进程基本不会被杀；顺带把守护服务拉起来（比闹钟可靠）
         if (!GuardService.isRunning()) GuardService.startSafely(this)
         val pkg = event.packageName?.toString() ?: return
+        Log.d(TAG, "window -> $pkg")
         GuardService.notifyForeground(pkg)
     }
 }

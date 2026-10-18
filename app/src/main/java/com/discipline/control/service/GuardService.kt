@@ -15,6 +15,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.discipline.control.core.DenyReason
 import com.discipline.control.core.Engine
@@ -70,6 +71,7 @@ class GuardService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        Log.i(TAG, "service onCreate")
         Notifier.init(this)
         Store.init(this)
         startForeground(NOTIF_ID, Notifier.ongoing("守护中", "正在加载规则…"))
@@ -96,6 +98,7 @@ class GuardService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        Log.i(TAG, "service onDestroy")
         instance = null
         handler.removeCallbacksAndMessages(null)
         runCatching { unregisterReceiver(screenReceiver) }
@@ -114,10 +117,12 @@ class GuardService : Service() {
             return
         }
         val rule = Store.rule(pkg) ?: run {
+            Log.d(TAG, "fg=$pkg (未管控)")
             refreshOngoing()
             return
         }
         if (!rule.enabled) {
+            Log.d(TAG, "fg=$pkg (管控已停用)")
             refreshOngoing()
             return
         }
@@ -132,6 +137,11 @@ class GuardService : Service() {
         val usage = day.peek(pkg)
         val resuming = Engine.isResumingSession(rule, usage, now)
         val deny = Engine.launchDeny(rule, usage, LocalDateTime.now(), sessionActive = resuming)
+        Log.i(
+            TAG,
+            "fg=${rule.pkg} deny=$deny resuming=$resuming opens=${usage?.opens ?: 0} " +
+                "finished=${usage?.finished ?: false} sessionMs=${usage?.sessionMs ?: 0L}"
+        )
         if (deny != null) {
             block(rule, deny, now)
             return
@@ -157,6 +167,7 @@ class GuardService : Service() {
         }
         s.resumedAt = now
         session = s
+        Log.i(TAG, "session start pkg=${rule.pkg} resuming=$resuming opens=${u.opens} baseMs=${s.baseMs}")
         Overlay.hide()
         if (!resuming) lastWarn = null
         refreshOngoing()
@@ -171,6 +182,7 @@ class GuardService : Service() {
         u.warned = s.warned
         u.lastExitAt = now
         Store.saveDay(day)
+        Log.i(TAG, "session pause pkg=${s.pkg} elapsedMin=${u.sessionMs / 60_000L} warned=${s.warned}")
         Overlay.hide()
         refreshOngoing()
     }
@@ -228,6 +240,11 @@ class GuardService : Service() {
 
     private fun warn(rule: AppRule, elapsed: Long, limitMs: Long, graceMs: Long) {
         val remainMin = ((limitMs + graceMs - elapsed) / 60_000L).coerceAtLeast(0)
+        Log.i(
+            TAG,
+            "warn pkg=${rule.pkg} elapsedMin=${elapsed / 60_000L} remainMin=$remainMin " +
+                "style=${Store.config().remindStyle}"
+        )
         val text = "已使用 ${elapsed / 60_000} 分钟，$remainMin 分钟后将强制退出"
         Notifier.notifyAlert(2001, rule.label + " 提醒", text)
         vibrate()
@@ -255,6 +272,7 @@ class GuardService : Service() {
     }
 
     private fun finishForDay(rule: AppRule, reason: DenyReason, now: Long) {
+        Log.i(TAG, "finish pkg=${rule.pkg} reason=$reason")
         val s = session
         val day = Store.day()
         val u = day.get(rule.pkg)
@@ -277,6 +295,7 @@ class GuardService : Service() {
         if (now - last < 1500L) return
         lastBlockAt[rule.pkg] = now
 
+        Log.i(TAG, "block pkg=${rule.pkg} reason=$reason forced=$forced")
         val text = Engine.denyText(reason, rule, LocalDateTime.now())
         lastBlock = BlockEvent(rule.pkg, rule.label, text, now)
         val prefix = if (forced) "已强制退出" else "已被拦截"
@@ -308,6 +327,7 @@ class GuardService : Service() {
     }
 
     companion object {
+        private const val TAG = "DC/Guard"
         private const val NOTIF_ID = 1001
         private const val KEEPALIVE_ACTION = "com.discipline.control.KEEPALIVE"
 

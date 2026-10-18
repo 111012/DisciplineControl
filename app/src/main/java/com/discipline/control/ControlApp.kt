@@ -10,6 +10,7 @@ class ControlApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.i("DC/App", "onCreate v" + BuildConfig.VERSION_NAME)
         Overlay.hide()
         Store.init(this)
         Notifier.init(this)
