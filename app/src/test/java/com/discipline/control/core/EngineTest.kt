@@ -46,6 +46,16 @@ class EngineTest {
     }
 
     @Test
+    fun crossMidnightBelongsToStartDay() {
+        // 只选周一：22:00–02:00 → 周二 00:30 仍属于"周一那段"
+        val mondayOnly = TimeWindow(1 shl 0, 22 * 60, 2 * 60)
+        assertTrue("周一 23:00", mondayOnly.covers(at(23, 0, 19)))
+        assertTrue("周二 00:30 属于周一那段", mondayOnly.covers(at(0, 30, 20)))
+        assertFalse("周一 00:30 不该算", mondayOnly.covers(at(0, 30, 19)))
+        assertFalse("周二 23:00 不该算", mondayOnly.covers(at(23, 0, 20)))
+    }
+
+    @Test
     fun weekdayFilter() {
         val weekdays = TimeWindow(0x1F, 20 * 60, 23 * 60) // 周一到周五
         assertTrue("周日 2026-10-18 不在工作日里", !weekdays.covers(at(21, 0, 18)))
@@ -181,6 +191,15 @@ class EngineTest {
         val u = PkgUsage(opens = 2, sessionMs = 30 * 60_000L, lastExitAt = 1_000_000L)
         assertTrue(Engine.isResumingSession(sg, u, 1_000_000L + 2 * 60_000L))
         assertFalse(Engine.isResumingSession(sg, u, 1_000_000L + 6 * 60_000L))
+    }
+
+    @Test
+    fun systemOverlayBlipNeverCountsAsNewOpen() {
+        // 计数间隔设成 0 时，最少也保留 10 秒回归缓冲（MIUI 游戏加速弹窗会抢 1~2 秒焦点）
+        val zeroGap = sg.copy(countGapMin = 0)
+        val u = PkgUsage(opens = 1, sessionMs = 5_000L, lastExitAt = 1_000_000L)
+        assertTrue(Engine.isResumingSession(zeroGap, u, 1_000_000L + 3_000L))
+        assertFalse(Engine.isResumingSession(zeroGap, u, 1_000_000L + 15_000L))
     }
 
     @Test

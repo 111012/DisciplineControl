@@ -15,11 +15,30 @@ data class TimeWindow(val days: Int, val startMin: Int, val endMin: Int) {
     fun covers(now: LocalDateTime): Boolean =
         covers(now.dayOfWeek.value - 1, now.hour * 60 + now.minute)
 
+    /**
+     * 是否覆盖"周 [dayIndex0Mon] 的第 [minute] 分钟"。
+     * 跨零点时段（如 22:00–02:00）里 00:00–02:00 这一段归属**前一天**，
+     * 否则"只在周一开放 22:00–02:00"会变成周二的凌晨也开放/周一凌晨被误拦。
+     */
     fun covers(dayIndex0Mon: Int, minute: Int): Boolean {
-        if ((days and (1 shl dayIndex0Mon)) == 0) return false
         return when {
-            startMin < endMin -> minute >= startMin && minute < endMin
-            startMin > endMin -> minute >= startMin || minute < endMin
+            startMin < endMin -> {
+                if (minute < startMin || minute >= endMin) false
+                else (days and (1 shl dayIndex0Mon)) != 0
+            }
+
+            startMin > endMin -> {
+                when {
+                    minute >= startMin -> (days and (1 shl dayIndex0Mon)) != 0
+                    minute < endMin -> {
+                        val prevDay = (dayIndex0Mon + 6) % 7
+                        (days and (1 shl prevDay)) != 0
+                    }
+
+                    else -> false
+                }
+            }
+
             else -> false
         }
     }
@@ -313,8 +332,11 @@ object Engine {
         // 已经提醒过、还在宽限期内：继续上次会话，绝不能重置计时
         if (usage.warned) return true
         if (usage.lastExitAt <= 0L) return false
+        // 最少给 10 秒回归缓冲：系统悬浮窗（MIUI 游戏加速等）抢一下焦点再回来，
+        // 即使把"计数间隔"设成 0 也不该算成新的一次打开
         val gap = rule.countGapMin.coerceAtLeast(0) * 60_000L
-        return now - usage.lastExitAt <= gap
+        val safeGap = if (gap < 10_000L) 10_000L else gap
+        return now - usage.lastExitAt <= safeGap
     }
 
     fun denyText(reason: DenyReason, rule: AppRule, now: LocalDateTime): String = when (reason) {

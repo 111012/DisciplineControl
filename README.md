@@ -1,15 +1,17 @@
 # 自律控制（Discipline Control）
 
-给小米平板 5 用的**自律 / 家长控制** App：把指定应用（比如王者荣耀）在桌面隐藏起来，只在你设定的时间段内可见；每天有打开次数上限；单次使用到点先提醒、再强制退出。**所有参数都在 App 里改，没有写死。**
+给小米平板用的**自律 / 家长控制** App（小米平板 5/6 均可，实测 Pad 6）：把指定应用（比如王者荣耀）在桌面隐藏起来，只在你设定的时间段内可见；每天有打开次数上限；单次使用到点先提醒、再强制退出。**所有参数都在 App 里改，没有写死。**
 
 - 纯本地运行：不联网、不上传任何数据、不申请存储权限
 - 方案：**自建桌面（Launcher）+ 无障碍前台监听 + 前台计时服务**
 - 包名 `com.discipline.control`，`minSdk 26` / `targetSdk 33`，Kotlin + AGP 7.4.2 + Gradle 7.6.4
 
-> **当前状态**：v0.1.0 已构建通过，17 个 JVM 单测全绿。
-> 安装包：`dist/DisciplineControl-v0.1.0-debug.apk`（2.9 MB，固定签名）
+> **当前状态**：v0.1.6 已构建并在小米平板 6 上完成真机验证，v0.1.6 的 28 个 JVM 单测全绿。
+> 安装包：`dist/DisciplineControl-v0.1.6-debug.apk`（versionCode 7，约 3.0 MB，固定签名；`dist/` 若已有更新版本，以最新 APK 为准）
 > 安装步骤：[docs/平板安装与使用说明.md](docs/平板安装与使用说明.md)
 > 逐项验收：[docs/验收测试清单.md](docs/验收测试清单.md)
+> 真机记录：[docs/真机验证记录.md](docs/真机验证记录.md)
+> 更新日志：[CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -105,7 +107,7 @@ cd D:\DSH_WorkSpace\DisciplineControl
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`（同时拷到 `dist/`）
 
-单元测试（纯 JVM，不需要真机，覆盖时段边界、次数/时长判定、跨零点、放宽判断等 17 个用例）：
+单元测试（纯 JVM，不需要真机，覆盖时段边界、次数/时长判定、跨零点、放宽判断、会话续接、JSON 往返等 28 个用例：`EngineTest` 22 + `ModelJsonTest` 6，v0.1.6 实测全绿）：
 
 ```powershell
 .\.toolchain\gradle-7.6.4\bin\gradle.bat :app:testDebugUnitTest --no-daemon
@@ -113,7 +115,7 @@ cd D:\DSH_WorkSpace\DisciplineControl
 
 > JUnit 4 的两个 jar 直接放在 `app/libs/`（`junit-4.13.2.jar`、`hamcrest-core-1.3.jar`），不依赖联网解析，避免镜像抽风。
 
-签名：`keystore/discipline.jks`（别名 `discipline`，密码 `***REMOVED***`）。**固定签名**，后续版本可覆盖安装，不会丢数据。
+签名：`keystore/discipline.jks`（别名 `discipline`，密码 `***REMOVED***`）。**固定签名**，后续版本可覆盖安装，应用数据不会丢；但 MIUI 在覆盖安装后会把默认桌面重置回小米桌面，升级后必须重设一次（见第七节）。
 
 依赖全部走阿里云 Maven 镜像（见 `settings.gradle.kts`）。
 
@@ -132,6 +134,7 @@ cd D:\DSH_WorkSpace\DisciplineControl
 3. **MIUI 会杀后台**：必须手动允许自启动、省电无限制、锁定后台，否则计时可能中断（中断后靠前台服务重启 + 15 分钟自拉起恢复）。
 4. **游戏内悬浮提醒默认关闭**：腾讯 ACE 可能把 `TYPE_APPLICATION_OVERLAY` 判定为辅助工具，所以默认只用通知 + 震动。需要"砸脸"提醒可在设置里打开，风险自担。
 5. 计时以"前台应用"为准，无法精确到"进入对局"；只要王者在前台就开始计时。
+6. **覆盖安装会重置默认桌面**：MIUI 在 `adb install -r` 后把主屏幕应用换回小米桌面，图标隐身随之中断。升级后重跑 `scripts/adb-deploy.ps1` 或重新设一次默认桌面（见第七节）。
 
 ---
 
@@ -155,12 +158,73 @@ pwsh -File scripts/adb-smoke.ps1 -Mode status  # 打印当前规则 / 今日用�
 adb shell am broadcast -a com.discipline.control.DEBUG -e cmd reset-day
 adb shell am broadcast -a com.discipline.control.DEBUG -e cmd rule --es pkg com.tencent.tmgp.sgame `
     --ei startHour 20 --ei endHour 23 --ei opens 3 --ei sessionMin 60 --ei graceMin 20 --ei gapMin 5
+# 分钟级时段边界：startMin/endMin 优先于 startHour/endHour
+adb shell am broadcast -a com.discipline.control.DEBUG -e cmd rule --es pkg com.tencent.tmgp.sgame `
+    --ei startMin 1330 --ei endMin 1400 --ei opens 3
+# 直接设今日用量，省得为测次数真去开 3 次（opens / sessionMin / finished / warned）
+adb shell am broadcast -a com.discipline.control.DEBUG -e cmd set-usage --es pkg com.tencent.tmgp.sgame `
+    --ei opens 3 --ei sessionMin 59 --ez finished false
+# 改全局配置（remindStyle 0=通知 / 1=悬浮横幅 / 2=先回桌面；relaxDelayHours；resetHour）
+adb shell am broadcast -a com.discipline.control.DEBUG -e cmd config --ei remindStyle 2 --ei relaxDelayHours 0
+# 造一条 20 秒后生效的「放宽」修改，验证待生效链路
+adb shell am broadcast -a com.discipline.control.DEBUG -e cmd pending-demo --es pkg com.tencent.tmgp.sgame
 adb shell am broadcast -a com.discipline.control.DEBUG -e cmd status
+adb shell am broadcast -a com.discipline.control.DEBUG -e cmd remove --es pkg com.tencent.tmgp.sgame
+adb shell am broadcast -a com.discipline.control.DEBUG -e cmd clear
 ```
+
+> `pending-demo` 会把该应用每日次数 +5 并设为 20 秒后生效，用来验证「待生效 → 到点自动应用 → 通知」整条链路。
 
 > 调试入口只在 debug 包里生效（`BuildConfig.DEBUG` 判断），正式发布包会关掉。
 
-## 七、后续可做（v0.2 候选）
+## 七、真机验证记录
+
+2026-10-18 在**小米平板 6**上完成首轮真机验证，核心链路全部通过。完整时间线、日志和遗留项见 [docs/真机验证记录.md](docs/真机验证记录.md)。
+
+| 项 | 值 |
+|---|---|
+| 机型 | 小米平板 6（Xiaomi Pad 6），型号 23043RP34C |
+| 系统 | Android 13 / MIUI V140 |
+| 屏幕 | 1800×2880（横屏 2880×1800），密度 400 |
+| 安装包 | `dist/DisciplineControl-v0.1.6-debug.apk`（versionCode 7） |
+
+> 早期文档按「小米平板 5」编写，实际验证机是 Pad 6；Pad 5 未实测。
+
+### 已验证
+
+| 项 | 结果 |
+|---|---|
+| 安装 / 授权 | ✅ `adb install -r -g`；默认桌面、无障碍、电池白名单、通知权限均自动完成 |
+| 默认桌面 | ✅ `cmd package set-home-activity com.discipline.control/.ui.HomeActivity` |
+| 桌面图标隐身 | ✅ 时段外受控应用消失，状态行「已隐身 · 明天 03:00 开放」 |
+| 启动拦截 | ✅ 拉起王者 0.4 秒内弹回桌面，`reason=NOT_IN_WINDOW` |
+| 计时链路 | ✅ 单次 1 分钟 + 宽限 1 分钟：第 61 秒 warn，第 121 秒 `finish reason=DAY_FINISHED` 并回桌面 |
+| 次数限制 | ✅ `opens=3` 时第 4 次被拦，`reason=NO_OPENS_LEFT` |
+| 时段结束 | ✅ `window end -> end session`，只结束本次会话（`finished=false`、`opens=1`），不锁死整天 |
+| 到点提醒第三档 | ✅ 60 秒 warn 后立即回桌面，不覆盖游戏画面 |
+| 设置 / PIN / 规则页 / 待生效 | ✅ 均实际点过；停用管控显示「10-19 23:35 生效」+ 取消按钮 |
+
+### 真机暴露的两个坑（已修）
+
+| 问题 | 现象 | 处理 |
+|---|---|---|
+| MIUI 插入 `com.miui.securitycenter` 窗口 | 拉起游戏时会话被暂停；游戏回到前台不再发窗口事件，计时卡死 | 改为「无障碍事件 + 每 2 秒主动查询 `rootInActiveWindow` 包名」双通道，补 `typeWindowsChanged`，无障碍配置允许取窗口内容 |
+| 覆盖安装重置默认桌面 | `adb install -r` 后主屏幕应用回到小米桌面，图标隐身失效 | 升级后重跑 `scripts/adb-deploy.ps1` 或重新 `set-home-activity`，并用 `resolve-activity` 复查 |
+
+### 如何复跑
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass   # 仅 Windows PowerShell 5.1 需要；pwsh 7 可跳过
+pwsh -File scripts/adb-deploy.ps1           # 装包 + 授权 + 默认桌面 + 无障碍 + 回显验证
+pwsh -File scripts/adb-smoke.ps1 -Mode block
+pwsh -File scripts/adb-smoke.ps1 -Mode warn
+pwsh -File scripts/adb-smoke.ps1 -Mode count
+pwsh -File scripts/adb-smoke.ps1 -Mode status
+```
+
+> `warn` 模式脚本默认 2 分钟 + 宽限 1 分钟（约 3.5 分钟）；本次实测用 `rule --ei sessionMin 1 --ei graceMin 1` 缩短到 1+1。
+
+## 八、后续可做（v0.2 候选）
 
 - 设备管理员加固（真正系统级隐藏 + 防卸载），做成可选开关
 - 桌面图标排序 / 分组 / 隐藏的系统应用入口

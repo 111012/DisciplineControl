@@ -64,6 +64,11 @@
             android:exported="false"
             android:theme="@style/Theme.Control" />
 
+        <activity
+            android:name=".ui.RepairActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Control" />
+
         <!-- 规则守护前台服务 -->
         <service
             android:name=".service.GuardService"

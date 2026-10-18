@@ -46,11 +46,12 @@ object Notifier {
             PackageManager.PERMISSION_GRANTED
     }
 
-    private fun build(channel: String, title: String, text: String, alert: Boolean): Notification {
+    private fun build(channel: String, title: String, text: String, alert: Boolean, intent: Intent? = null): Notification {
+        val target = intent ?: Intent(ctx(), HomeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pi = PendingIntent.getActivity(
             ctx(),
-            100,
-            Intent(ctx(), HomeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            100 + (target.component?.className?.hashCode() ?: 0) % 100,
+            target,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val builder = NotificationCompat.Builder(ctx(), channel)
@@ -76,13 +77,14 @@ object Notifier {
 
     fun ongoing(title: String, text: String): Notification = build(CH_ONGOING, title, text, false)
 
-    fun alert(title: String, text: String): Notification = build(CH_ALERT, title, text, true)
+    fun alert(title: String, text: String, intent: Intent? = null): Notification =
+        build(CH_ALERT, title, text, true, intent)
 
-    fun notifyAlert(id: Int, title: String, text: String) {
+    fun notifyAlert(id: Int, title: String, text: String, intent: Intent? = null) {
         if (!canPost()) return
         runCatching {
             val nm = ctx().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(id, alert(title, text))
+            nm.notify(id, alert(title, text, intent))
         }
     }
 

@@ -103,6 +103,7 @@ class HomeActivity : AppCompatActivity() {
         super.onResume()
         handler.removeCallbacks(ticker)
         handler.post(ticker)
+        if (!GuardService.isRunning()) GuardService.startSafely(this)
         refresh()
     }
 
@@ -183,10 +184,16 @@ class HomeActivity : AppCompatActivity() {
             val left = (lw.remainMin - (System.currentTimeMillis() - lw.at) / 60_000L).coerceAtLeast(0L)
             if (left > 0) addChip("⏳ ${lw.label} 还剩 $left 分钟", true) {}
         }
-        if (!needDefault && accEnabled && Store.rules().isEmpty()) {
+        val running = GuardService.isRunning()
+        if (!accEnabled || !running) {
+            addChip("⚠ 守护未运行：点此修复", true) {
+                startActivity(Intent(this, RepairActivity::class.java))
+            }
+        }
+        if (!needDefault && accEnabled && running && Store.rules().isEmpty()) {
             addChip("＋ 添加管控应用", false) { openSettings() }
         }
-        if (!needDefault && accEnabled && Store.rules().isNotEmpty()) {
+        if (!needDefault && accEnabled && running && Store.rules().isNotEmpty()) {
             addChip("守护运行中", false) {}
         }
     }

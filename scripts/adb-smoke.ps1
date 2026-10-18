@@ -1,4 +1,4 @@
-# 真机快速验证：用 debug 广播改规则，用 monkey 拉起目标应用，观察日志
+﻿# 真机快速验证：用 debug 广播改规则，用 monkey 拉起目标应用，观察日志
 # 用法：
 #   pwsh -File scripts/adb-smoke.ps1 -Mode block     # 时段外(3:00-4:00)拉王者，应在 2 秒内被弹回
 #   pwsh -File scripts/adb-smoke.ps1 -Mode warn      # 计时 2 分钟+宽限 1 分钟，跑完提醒->强制退出（约 3.5 分钟）

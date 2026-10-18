@@ -1,4 +1,4 @@
-# 实时看 App 的判定日志（只显示自己打的 tag + 崩溃）
+﻿# 实时看 App 的判定日志（只显示自己打的 tag + 崩溃）
 $root = Split-Path -Parent $PSScriptRoot
 $adb = Join-Path $root '.toolchain\android-sdk\platform-tools\adb.exe'
 $env:TMP = Join-Path $root '.toolchain\tmp'

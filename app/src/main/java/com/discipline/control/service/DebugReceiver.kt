@@ -7,6 +7,7 @@ import android.util.Log
 import com.discipline.control.BuildConfig
 import com.discipline.control.core.AppRule
 import com.discipline.control.core.Apps
+import com.discipline.control.core.PendingChange
 import com.discipline.control.core.Store
 import com.discipline.control.core.TimeWindow
 
@@ -47,10 +48,23 @@ class DebugReceiver : BroadcastReceiver() {
                 val base = Store.rule(pkg) ?: AppRule.default(pkg, Apps.label(context, pkg))
                 val startHour = intent.getIntExtra("startHour", 0)
                 val endHour = intent.getIntExtra("endHour", 24)
+                // 支持直接给"当天第几分钟"（方便测时段开始/结束的边界）
+                val startMin = if (intent.hasExtra("startMin")) {
+                    intent.getIntExtra("startMin", 0)
+                } else {
+                    startHour * 60
+                }
+                val endMin = if (intent.hasExtra("endMin")) {
+                    intent.getIntExtra("endMin", 1440)
+                } else if (endHour >= 24) {
+                    24 * 60
+                } else {
+                    endHour * 60
+                }
                 val window = TimeWindow(
                     TimeWindow.EVERY_DAY,
-                    (startHour.coerceIn(0, 24)) * 60,
-                    if (endHour >= 24) 24 * 60 else endHour.coerceAtLeast(0) * 60
+                    startMin.coerceIn(0, 24 * 60),
+                    endMin.coerceIn(0, 24 * 60)
                 )
                 val rule = base.copy(
                     windows = listOf(window),
@@ -64,10 +78,63 @@ class DebugReceiver : BroadcastReceiver() {
                 Log.i(TAG, "rule saved: ${rule.toJson()}")
             }
 
+            // 直接设定今日状态，省得为了测次数限制真的去开 3 次游戏
+            "set-usage" -> {
+                val pkg = intent.getStringExtra("pkg") ?: return
+                val day = Store.day()
+                val u = day.get(pkg)
+                if (intent.hasExtra("opens")) u.opens = intent.getIntExtra("opens", 0)
+                if (intent.hasExtra("sessionMin")) {
+                    u.sessionMs = intent.getIntExtra("sessionMin", 0) * 60_000L
+                }
+                if (intent.hasExtra("finished")) {
+                    u.finished = intent.getBooleanExtra("finished", false)
+                }
+                if (intent.hasExtra("warned")) {
+                    u.warned = intent.getBooleanExtra("warned", false)
+                }
+                u.lastExitAt = 0L
+                Store.saveDay(day)
+                Log.i(TAG, "usage updated: ${u.toJson()}")
+            }
+
             "remove" -> {
                 val pkg = intent.getStringExtra("pkg") ?: return
                 Store.removeRule(pkg)
                 Log.i(TAG, "rule removed: $pkg")
+            }
+
+            "config" -> {
+                var cfg = Store.config()
+                if (intent.hasExtra("remindStyle")) {
+                    cfg = cfg.copy(remindStyle = intent.getIntExtra("remindStyle", 0))
+                }
+                if (intent.hasExtra("relaxDelayHours")) {
+                    cfg = cfg.copy(relaxDelayHours = intent.getIntExtra("relaxDelayHours", 24))
+                }
+                if (intent.hasExtra("resetHour")) {
+                    cfg = cfg.copy(resetHour = intent.getIntExtra("resetHour", 0))
+                }
+                Store.saveConfig(cfg)
+                Log.i(TAG, "config saved: ${cfg.toJson()}")
+            }
+
+            // 造一条 20 秒后才生效的"放宽"修改，用来验证延迟生效链路
+            "pending-demo" -> {
+                val pkg = intent.getStringExtra("pkg") ?: return
+                val rule = Store.rule(pkg) ?: return
+                val newRule = rule.copy(dailyOpenLimit = rule.dailyOpenLimit + 5)
+                val at = System.currentTimeMillis() + 20_000L
+                Store.addPending(
+                    PendingChange(
+                        java.util.UUID.randomUUID().toString(),
+                        "rule",
+                        newRule.toJson(),
+                        at,
+                        "${rule.label}：每日次数 ${rule.dailyOpenLimit} → ${newRule.dailyOpenLimit}（调试）"
+                    )
+                )
+                Log.i(TAG, "pending added, effectiveAt=$at")
             }
 
             "clear" -> {

@@ -87,7 +87,7 @@ object Pin {
                     onOk()
                 }
             }
-            .setNegativeButton("取消", null)
+            .setNegativeButton("取消") { _, _ -> activity.finish() }
             .setCancelable(false)
             .show()
     }

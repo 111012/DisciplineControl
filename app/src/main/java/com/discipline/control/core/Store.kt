@@ -11,11 +11,13 @@ import java.util.UUID
 
 data class PendingChange(
     val id: String,
-    /** "rule" 或 "config" */
+    /** "rule" / "config" / "remove" */
     val type: String,
     val payload: JSONObject,
     val effectiveAt: Long,
-    val summary: String
+    val summary: String,
+    /** 登记时的规则快照（JSON字符串），用于检测"期间规则又被改过"，避免延迟项把后来的收紧回滚掉 */
+    val base: String = ""
 )
 
 /**
@@ -58,18 +60,27 @@ object Store {
     fun rules(): MutableList<AppRule> {
         var list = ruleCache
         if (list == null) {
-            list = ArrayList()
-            runCatching {
-                val arr = JSONArray(sp.getString("rules", "[]") ?: "[]")
-                for (i in 0 until arr.length()) {
-                    val o = arr.optJSONObject(i) ?: continue
-                    val r = AppRule.fromJson(o)
-                    if (r.pkg.isNotEmpty()) list.add(r)
-                }
-            }
+            list = parseRules(sp.getString("rules", null))
+                ?: parseRules(sp.getString("rules_bak", null))
+                ?: ArrayList()
             ruleCache = list
         }
         return list
+    }
+
+    /** 解析失败返回 null（原实现吞掉异常后返回空表，会把坏数据覆盖成"没有规则"） */
+    private fun parseRules(text: String?): MutableList<AppRule>? {
+        if (text.isNullOrBlank()) return null
+        return runCatching {
+            val out = ArrayList<AppRule>()
+            val arr = JSONArray(text)
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val r = AppRule.fromJson(o)
+                if (r.pkg.isNotEmpty()) out.add(r)
+            }
+            out
+        }.getOrNull()
     }
 
     fun rule(pkg: String): AppRule? = rules().firstOrNull { it.pkg == pkg }
@@ -77,7 +88,11 @@ object Store {
     fun saveRules() {
         val arr = JSONArray()
         rules().forEach { arr.put(it.toJson()) }
-        sp.edit().putString("rules", arr.toString()).apply()
+        val json = arr.toString()
+        sp.edit()
+            .putString("rules_bak", sp.getString("rules", "[]") ?: "[]")
+            .putString("rules", json)
+            .apply()
     }
 
     fun upsertRule(rule: AppRule) {
@@ -112,14 +127,22 @@ object Store {
     }
 
     fun saveDay(d: DayUsage) {
-        dayCache = d
-        sp.edit().putString("day_${d.date}", d.toJson().toString()).apply()
+        // 用 commit：强杀/断电时当日次数不能回退（apply 是异步落盘）
+        sp.edit().putString("day_${d.date}", d.toJson().toString()).commit()
+        // 只有"当天"才更新缓存，结算昨天的会话不能污染今天的缓存
+        if (d.date == logicalDate().toString()) dayCache = d
         // 顺手清理 30 天前的记录
         runCatching {
             val cutoff = logicalDate().minusDays(30).toString()
             sp.all.keys.filter { it.startsWith("day_") && it.removePrefix("day_") < cutoff }
                 .forEach { sp.edit().remove(it).apply() }
         }
+    }
+
+    /** 按日期 key 取用量（会话跨天结算时用） */
+    fun dayFor(dateKey: String): DayUsage {
+        if (dateKey == logicalDate().toString()) return day()
+        return dayOf(LocalDate.parse(dateKey)) ?: DayUsage(dateKey)
     }
 
     /** 读取历史某天的用量（用于统计页） */
@@ -146,7 +169,8 @@ object Store {
                             type = o.optString("type", "rule"),
                             payload = o.optJSONObject("payload") ?: JSONObject(),
                             effectiveAt = o.optLong("at", 0L),
-                            summary = o.optString("summary", "")
+                            summary = o.optString("summary", ""),
+                            base = o.optString("base", "")
                         )
                     )
                 }
@@ -166,6 +190,7 @@ object Store {
                     .put("payload", it.payload)
                     .put("at", it.effectiveAt)
                     .put("summary", it.summary)
+                    .put("base", it.base)
             )
         }
         sp.edit().putString("pending", arr.toString()).apply()
@@ -186,28 +211,45 @@ object Store {
         val due = pending().filter { it.effectiveAt <= nowMs }
         if (due.isEmpty()) return emptyList()
         val applied = ArrayList<String>()
+        val skipped = ArrayList<String>()
         for (p in due) {
             runCatching {
                 when (p.type) {
                     "rule" -> {
                         val r = AppRule.fromJson(p.payload)
-                        if (r.pkg.isNotEmpty()) upsertRule(r)
+                        val cur = rule(r.pkg)
+                        // 登记之后规则又被改过（通常是收紧）：丢弃这条延迟项，避免把收紧回滚
+                        if (p.base.isNotEmpty() && cur != null && cur.toJson().toString() != p.base) {
+                            skipped.add(p.summary)
+                        } else if (r.pkg.isNotEmpty()) {
+                            upsertRule(r)
+                            applied.add(p.summary)
+                        }
                     }
 
                     "config" -> {
                         val cur = config()
                         val incoming = GlobalConfig.fromJson(p.payload)
                         saveConfig(incoming.copy(pinSalt = cur.pinSalt, pinHash = cur.pinHash))
+                        applied.add(p.summary)
                     }
 
                     "remove" -> {
                         val pkg = p.payload.optString("pkg")
-                        if (pkg.isNotEmpty()) removeRule(pkg)
+                        if (pkg.isNotEmpty()) {
+                            removeRule(pkg)
+                            applied.add(p.summary)
+                        }
                     }
+
+                    else -> Unit
                 }
-                applied.add(p.summary)
+                Unit
             }
             removePending(p.id)
+        }
+        if (skipped.isNotEmpty()) {
+            android.util.Log.i("DC/Store", "pending skipped (rule changed meanwhile): $skipped")
         }
         return applied
     }

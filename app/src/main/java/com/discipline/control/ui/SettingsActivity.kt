@@ -205,10 +205,38 @@ class SettingsActivity : AppCompatActivity() {
         val cfg = Store.config()
 
         card.addView(
-            Ui.row(this, "每天几点重置次数", "当前：${cfg.resetHour} 点", "修改") {
+            Ui.row(
+                this,
+                "每天几点重置次数",
+                "当前：${cfg.resetHour} 点（改动会按「放宽延迟」延后生效，防止拿来清空当天额度）",
+                "修改"
+            ) {
                 val options = (0..6).map { "$it 点" to it }
                 pickNumber("每天几点算新的一天", options, cfg.resetHour) { hour ->
-                    Store.saveConfig(Store.config().copy(resetHour = hour))
+                    if (hour == cfg.resetHour) {
+                        render()
+                        return@pickNumber
+                    }
+                    val delay = cfg.relaxDelayHours
+                    if (delay > 0) {
+                        val at = System.currentTimeMillis() + delay * 3600_000L
+                        Store.addPending(
+                            PendingChange(
+                                UUID.randomUUID().toString(),
+                                "config",
+                                cfg.copy(resetHour = hour).toJson(),
+                                at,
+                                "每天重置时间 ${cfg.resetHour} 点 → $hour 点"
+                            )
+                        )
+                        Toast.makeText(
+                            this,
+                            "这会改变当天额度的计算，已登记，${fmtTime(at)} 后生效",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        Store.saveConfig(cfg.copy(resetHour = hour))
+                    }
                     render()
                 }
             }

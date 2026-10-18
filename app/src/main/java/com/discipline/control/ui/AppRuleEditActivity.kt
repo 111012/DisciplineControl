@@ -386,10 +386,25 @@ class AppRuleEditActivity : AppCompatActivity() {
     // ---------------- 保存 ----------------
 
     private fun save() {
-        val limit = etLimit.text.toString().toIntOrNull() ?: 0
-        val session = etSession.text.toString().toIntOrNull() ?: 0
-        val grace = etGrace.text.toString().toIntOrNull() ?: 0
-        val gap = etGap.text.toString().toIntOrNull() ?: 0
+        // 空/非数字不能静默当成 0（0 = 不限），否则会意外把限制取消
+        fun read(et: EditText, name: String): Int? {
+            val raw = et.text.toString().trim()
+            if (raw.isEmpty()) {
+                Toast.makeText(this, "$name 不能为空（填 0 表示不限）", Toast.LENGTH_SHORT).show()
+                return null
+            }
+            val v = raw.toIntOrNull()
+            if (v == null) {
+                Toast.makeText(this, "$name 只能填数字", Toast.LENGTH_SHORT).show()
+                return null
+            }
+            return v
+        }
+
+        val limit = read(etLimit, "每日次数") ?: return
+        val session = read(etSession, "单次时长") ?: return
+        val grace = read(etGrace, "提醒后宽限") ?: return
+        val gap = read(etGap, "计数间隔") ?: return
 
         val newRule = AppRule(
             pkg = pkg,
@@ -413,7 +428,8 @@ class AppRuleEditActivity : AppCompatActivity() {
                     "rule",
                     newRule.toJson(),
                     at,
-                    diffSummary(old, newRule)
+                    diffSummary(old, newRule),
+                    base = old.toJson().toString()
                 )
             )
             val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())

@@ -25,6 +25,7 @@ import com.discipline.control.core.PkgUsage
 import com.discipline.control.core.RemindStyle
 import com.discipline.control.core.Store
 import com.discipline.control.core.AppRule
+import com.discipline.control.ui.RepairActivity
 import java.time.LocalDateTime
 
 /** 桌面上用于提示"刚刚被拦截了"的事件 */
@@ -39,7 +40,7 @@ data class WarnEvent(val pkg: String, val label: String, val remainMin: Long, va
  */
 class GuardService : Service() {
 
-    private class Session(val pkg: String) {
+    private class Session(val pkg: String, val date: String) {
         var baseMs: Long = 0L
         var resumedAt: Long = 0L
         var warned: Boolean = false
@@ -51,6 +52,10 @@ class GuardService : Service() {
     private val lastBlockAt = HashMap<String, Long>()
     private var lastPendingCheck = 0L
     private var lastOngoingUpdate = 0L
+    private var lastReconciledPkg: String? = null
+    private var tickCount = 0
+    private var lastA11yCheck = 0L
+    private var lastRepairAlertAt = 0L
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -99,6 +104,9 @@ class GuardService : Service() {
 
     override fun onDestroy() {
         Log.i(TAG, "service onDestroy")
+        // 进程被正常停掉时也要把当前会话落盘，否则重进会重新计时
+        runCatching { persistSession(System.currentTimeMillis()) }
+        runCatching { Overlay.hide() }
         instance = null
         handler.removeCallbacksAndMessages(null)
         runCatching { unregisterReceiver(screenReceiver) }
@@ -108,6 +116,8 @@ class GuardService : Service() {
     // ---------------- 前台应用变化 ----------------
 
     fun onForegroundPkg(pkg: String) {
+        if (pkg == lastReconciledPkg) return
+        lastReconciledPkg = pkg
         if (Engine.isTransientPackage(pkg)) {
             // 通知栏 / 输入法 / 权限弹窗：不是真的离开游戏，继续计时
             Log.d(TAG, "fg=$pkg (临时窗口，忽略)")
@@ -155,9 +165,10 @@ class GuardService : Service() {
     }
 
     private fun startOrResumeSession(rule: AppRule, resuming: Boolean, now: Long) {
-        val day = Store.day()
+        val dateKey = Store.logicalDate().toString()
+        val day = Store.dayFor(dateKey)
         val u = day.get(rule.pkg)
-        val s = Session(rule.pkg)
+        val s = Session(rule.pkg, dateKey)
         if (resuming) {
             s.baseMs = u.sessionMs
             s.warned = u.warned
@@ -181,7 +192,10 @@ class GuardService : Service() {
     private fun pauseSession(now: Long) {
         val s = session ?: return
         session = null
-        val day = Store.day()
+        // 关键：清掉前台去重状态，否则"关屏->亮屏"或"被弹回后立即切回"这类没有新窗口事件的情况会永远不再恢复会话
+        lastReconciledPkg = null
+        // 会话可能跨过零点：时长要写回会话开始的那一天
+        val day = Store.dayFor(s.date)
         val u = day.get(s.pkg)
         u.sessionMs = s.elapsed(now)
         u.warned = s.warned
@@ -192,30 +206,59 @@ class GuardService : Service() {
         refreshOngoing()
     }
 
+    /** 不触发通知/UI 的落盘（onDestroy 用） */
+    private fun persistSession(now: Long) {
+        val s = session ?: return
+        val day = Store.dayFor(s.date)
+        val u = day.get(s.pkg)
+        u.sessionMs = s.elapsed(now)
+        u.warned = s.warned
+        u.lastExitAt = now
+        Store.saveDay(day)
+        session = null
+        lastReconciledPkg = null
+    }
+
     // ---------------- 每秒检查 ----------------
 
     private fun onTick() {
         val now = System.currentTimeMillis()
+        tickCount++
+        // 每 2 秒主动核对一次前台窗口，兜住"系统悬浮窗抢焦点后游戏回前台不发事件"的情况
+        if (tickCount % 2 == 0) {
+            val fg = GuardAccessibilityService.activePackage()
+            if (fg != null && fg != lastReconciledPkg) {
+                Log.d(TAG, "poll -> $fg")
+                onForegroundPkg(fg)
+            }
+        }
         val s = session
         if (s != null) {
-            val rule = Store.rule(s.pkg)
-            if (rule == null || !rule.enabled) {
-                session = null
+            // 跨天：把这一整段时长结算回原日期，然后结束会话，绝不能让昨天的时长压死今天
+            if (s.date != Store.logicalDate().toString()) {
+                Log.i(TAG, "day rolled over -> pause session pkg=${s.pkg} (date=${s.date})")
+                pauseSession(now)
             } else {
-                val nowDt = LocalDateTime.now()
-                if (rule.kickAtWindowEnd && !rule.inWindow(nowDt)) {
-                    endSessionAtWindowEnd(rule, now)
-                } else if (rule.sessionLimitMin > 0) {
-                    val limitMs = rule.sessionLimitMin * 60_000L
-                    val graceMs = rule.graceMin.coerceAtLeast(0) * 60_000L
-                    val elapsed = s.elapsed(now)
-                    if (elapsed >= limitMs && !s.warned) {
-                        s.warned = true
-                        persistWarned(s, now)
-                        warn(rule, elapsed, limitMs, graceMs)
-                    }
-                    if (elapsed >= limitMs + graceMs) {
-                        finishForDay(rule, DenyReason.DAY_FINISHED, now)
+                val rule = Store.rule(s.pkg)
+                if (rule == null || !rule.enabled) {
+                    session = null
+                    lastReconciledPkg = null
+                } else {
+                    val nowDt = LocalDateTime.now()
+                    if (rule.kickAtWindowEnd && !rule.inWindow(nowDt)) {
+                        endSessionAtWindowEnd(rule, now)
+                    } else if (rule.sessionLimitMin > 0) {
+                        val limitMs = rule.sessionLimitMin * 60_000L
+                        val graceMs = rule.graceMin.coerceAtLeast(0) * 60_000L
+                        val elapsed = s.elapsed(now)
+                        if (elapsed >= limitMs && !s.warned) {
+                            s.warned = true
+                            persistWarned(s, now)
+                            warn(rule, elapsed, limitMs, graceMs)
+                        }
+                        if (elapsed >= limitMs + graceMs) {
+                            finishForDay(rule, DenyReason.DAY_FINISHED, now)
+                        }
                     }
                 }
             }
@@ -228,6 +271,27 @@ class GuardService : Service() {
                 Notifier.notifyAlert(2002, "设置已生效", applied.joinToString("；"))
                 refreshOngoing()
             }
+        }
+
+        // 无障碍被系统/安全中心关掉时守护会彻底失效：主动提醒一次（5 分钟一条，避免刷屏）
+        if (now - lastA11yCheck > 15_000L) {
+            lastA11yCheck = now
+            val ok = GuardAccessibilityService.isEnabled(this)
+            if (!ok) {
+                Log.w(TAG, "accessibility disabled")
+                if (now - lastRepairAlertAt > 5 * 60_000L) {
+                    lastRepairAlertAt = now
+                    val intent = Intent(this, RepairActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    Notifier.notifyAlert(
+                        2003,
+                        "拦截已失效",
+                        "无障碍服务被系统关掉了，点这里一键修复",
+                        intent
+                    )
+                }
+            }
+            refreshOngoing()
         }
         if (now - lastOngoingUpdate > 60_000L) {
             lastOngoingUpdate = now
@@ -258,7 +322,7 @@ class GuardService : Service() {
             RemindStyle.HOME -> {
                 // 不覆盖游戏画面，直接退回桌面；桌面上会显示还剩多少分钟，点回去可以继续用完宽限
                 lastWarn = WarnEvent(rule.pkg, rule.label, remainMin, System.currentTimeMillis())
-                GuardAccessibilityService.goHome()
+                homeWithRetry()
             }
         }
     }
@@ -287,7 +351,7 @@ class GuardService : Service() {
         val text = "开放时段已结束，" + Engine.nextOpenText(rule, LocalDateTime.now()) + "再来"
         lastBlock = BlockEvent(rule.pkg, rule.label, text, now)
         Notifier.notifyAlert(2000 + (rule.pkg.hashCode() and 0xFF), rule.label + " 时段结束", text)
-        GuardAccessibilityService.goHome()
+        homeWithRetry()
     }
 
     private fun finishForDay(rule: AppRule, reason: DenyReason, now: Long) {
@@ -311,21 +375,36 @@ class GuardService : Service() {
 
     private fun block(rule: AppRule, reason: DenyReason, now: Long, forced: Boolean = false) {
         val last = lastBlockAt[rule.pkg] ?: 0L
-        if (now - last < 1500L) return
+        val throttled = now - last < 1500L
         lastBlockAt[rule.pkg] = now
+        // 拦截动作必须无条件执行：1.5 秒去重只用于防止通知刷屏，
+        // 以前把它当成整体闸门，会在"被弹回后 1.5 秒内再点一次"时完全绕过管控。
+        homeWithRetry()
+        // 允许下一次事件/轮询重新判定（否则去重状态会把后续同包事件全部吃掉）
+        lastReconciledPkg = null
+        if (throttled) return
 
         Log.i(TAG, "block pkg=${rule.pkg} reason=$reason forced=$forced")
         val text = Engine.denyText(reason, rule, LocalDateTime.now())
         lastBlock = BlockEvent(rule.pkg, rule.label, text, now)
         val prefix = if (forced) "已强制退出" else "已被拦截"
         Notifier.notifyAlert(2000 + (rule.pkg.hashCode() and 0xFF), rule.label + " " + prefix, text)
-        GuardAccessibilityService.goHome()
+    }
+
+    /** 回桌面失败时重试几次（无障碍刚被系统重绑那几秒会返回 false） */
+    private fun homeWithRetry(attempt: Int = 0) {
+        val ok = GuardAccessibilityService.goHome()
+        if (!ok && attempt < 2) {
+            handler.postDelayed({ homeWithRetry(attempt + 1) }, 500L)
+        }
     }
 
     private fun refreshOngoing() {
         val s = session
         val title = "自律控制"
-        val text: String = if (s != null) {
+        val text: String = if (!GuardAccessibilityService.isEnabled(this)) {
+            "⚠ 无障碍已关闭：拦截失效，点应用图标进去修复"
+        } else if (s != null) {
             val rule = Store.rule(s.pkg)
             if (rule != null && rule.sessionLimitMin > 0) {
                 val elapsed = s.elapsed(System.currentTimeMillis())

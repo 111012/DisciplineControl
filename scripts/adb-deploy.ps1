@@ -1,4 +1,4 @@
-# adb 一键部署：装包 + 授予权限 + 设默认桌面 + 开无障碍 + 忽略电池优化
+﻿# adb 一键部署：装包 + 授予权限 + 设默认桌面 + 开无障碍 + 忽略电池优化
 # 用法：pwsh -File scripts/adb-deploy.ps1            （装最新 dist/*.apk）
 #       pwsh -File scripts/adb-deploy.ps1 -SkipInstall （只重授权，不重装）
 param([switch]$SkipInstall)
@@ -8,7 +8,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $adb = Join-Path $root '.toolchain\android-sdk\platform-tools\adb.exe'
 $pkg = 'com.discipline.control'
 $a11y = "$pkg/$pkg.service.GuardAccessibilityService"
-$home = "$pkg/.ui.HomeActivity"
+$homeComp = "$pkg/.ui.HomeActivity"
 
 if (-not (Test-Path $adb)) { Write-Host "找不到 adb：$adb" -ForegroundColor Red; exit 1 }
 
@@ -41,7 +41,7 @@ Write-Host '--- 授权 ---'
 & $adb shell appops set $pkg AUTO_START allow 2>&1 | Out-Null
 
 Write-Host '--- 设默认桌面 ---'
-$out = & $adb shell cmd package set-home-activity $home 2>&1
+$out = & $adb shell cmd package set-home-activity $homeComp 2>&1
 if ($LASTEXITCODE -ne 0 -or "$out" -match 'Error|Exception|Unknown') {
     Write-Host "自动设默认桌面失败，需要手动：设置→应用→默认应用→主屏幕应用→自律控制" -ForegroundColor Yellow
 } else {

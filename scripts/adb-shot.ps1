@@ -1,4 +1,4 @@
-# 截屏到 screenshots/ ，方便远程看桌面/弹窗状态
+﻿# 截屏到 screenshots/ ，方便远程看桌面/弹窗状态
 # 用法：pwsh -File scripts/adb-shot.ps1 [-Name home]
 param([string]$Name = '')
 
