@@ -290,6 +290,19 @@ object Engine {
     }
 
     /**
+     * 通知栏、输入法、权限弹窗这类系统临时窗口，不代表"用户离开了游戏"。
+     * 游戏里下拉通知栏不应该暂停计时。
+     */
+    fun isTransientPackage(pkg: String): Boolean {
+        if (pkg == "android") return true
+        val lower = pkg.lowercase()
+        return lower.contains("systemui") ||
+            lower.contains("inputmethod") ||
+            lower.contains("permissioncontroller") ||
+            lower.contains("packageinstaller")
+    }
+
+    /**
      * 重新进入受限应用时，是否算"接着上次的会话"：
      * 不消耗次数、不把计时清零（宽限期内回来继续倒数）。
      */

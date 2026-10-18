@@ -108,6 +108,11 @@ class GuardService : Service() {
     // ---------------- 前台应用变化 ----------------
 
     fun onForegroundPkg(pkg: String) {
+        if (Engine.isTransientPackage(pkg)) {
+            // 通知栏 / 输入法 / 权限弹窗：不是真的离开游戏，继续计时
+            Log.d(TAG, "fg=$pkg (临时窗口，忽略)")
+            return
+        }
         val now = System.currentTimeMillis()
         val cur = session
         if (cur != null && cur.pkg != pkg) pauseSession(now)
@@ -199,7 +204,7 @@ class GuardService : Service() {
             } else {
                 val nowDt = LocalDateTime.now()
                 if (rule.kickAtWindowEnd && !rule.inWindow(nowDt)) {
-                    finishForDay(rule, DenyReason.WINDOW_ENDED, now)
+                    endSessionAtWindowEnd(rule, now)
                 } else if (rule.sessionLimitMin > 0) {
                     val limitMs = rule.sessionLimitMin * 60_000L
                     val graceMs = rule.graceMin.coerceAtLeast(0) * 60_000L
@@ -269,6 +274,20 @@ class GuardService : Service() {
                 v.vibrate(pattern, -1)
             }
         }
+    }
+
+    /**
+     * 时段结束：只结束本次会话，**不**把今天判死。
+     * 否则配置了"一天多个时段"（例如 12–13 点 + 20–23 点）时，第一段结束就会把整天的额度锁死。
+     */
+    private fun endSessionAtWindowEnd(rule: AppRule, now: Long) {
+        Log.i(TAG, "window end -> end session pkg=${rule.pkg}")
+        pauseSession(now)
+        lastWarn = null
+        val text = "开放时段已结束，" + Engine.nextOpenText(rule, LocalDateTime.now()) + "再来"
+        lastBlock = BlockEvent(rule.pkg, rule.label, text, now)
+        Notifier.notifyAlert(2000 + (rule.pkg.hashCode() and 0xFF), rule.label + " 时段结束", text)
+        GuardAccessibilityService.goHome()
     }
 
     private fun finishForDay(rule: AppRule, reason: DenyReason, now: Long) {

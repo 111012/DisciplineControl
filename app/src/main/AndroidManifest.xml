@@ -97,6 +97,15 @@
                 <action android:name="com.discipline.control.KEEPALIVE" />
             </intent-filter>
         </receiver>
+        <!-- 仅 debug 构建有效的 adb 调试入口（release 里 DebugReceiver 会直接 return） -->
+        <receiver
+            android:name=".service.DebugReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="com.discipline.control.DEBUG" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

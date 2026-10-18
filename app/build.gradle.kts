@@ -11,8 +11,8 @@ android {
         applicationId = "com.discipline.control"
         minSdk = 26
         targetSdk = 33
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
     }
 
     signingConfigs {
@@ -59,5 +59,11 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.9.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
-    testImplementation(files("libs/junit-4.13.2.jar", "libs/hamcrest-core-1.3.jar"))
+    testImplementation(
+        files(
+            "libs/junit-4.13.2.jar",
+            "libs/hamcrest-core-1.3.jar",
+            "libs/json-20231013.jar"
+        )
+    )
 }

@@ -162,6 +162,18 @@ class EngineTest {
         assertTrue(Engine.isRelaxation(sg, sg.copy(countGapMin = 30)))
     }
 
+    @Test
+    fun transientWindowsDontCountAsLeaving() {
+        assertTrue(Engine.isTransientPackage("com.android.systemui"))
+        assertTrue(Engine.isTransientPackage("com.miui.systemui"))
+        assertTrue(Engine.isTransientPackage("com.sohu.inputmethod.sogou"))
+        assertTrue(Engine.isTransientPackage("com.google.android.permissioncontroller"))
+        assertTrue(Engine.isTransientPackage("android"))
+        assertFalse(Engine.isTransientPackage("com.tencent.tmgp.sgame"))
+        assertFalse(Engine.isTransientPackage("com.discipline.control"))
+        assertFalse(Engine.isTransientPackage("com.miui.securitycenter"))
+    }
+
     // ---------------- 会话续接（决定会不会偷偷重新给满时长） ----------------
 
     @Test

@@ -135,7 +135,32 @@ cd D:\DSH_WorkSpace\DisciplineControl
 
 ---
 
-## 六、后续可做（v0.2 候选）
+## 六、真机调试（adb）
+
+工具链里自带 adb，脚本都在 `scripts/`。平板需开「USB 调试 + USB 安装」，插线选「传输文件」。
+
+```powershell
+pwsh -File scripts/adb-deploy.ps1          # 装包 + 授通知 + 设默认桌面 + 开无障碍 + 忽略电池优化 + 回显验证
+pwsh -File scripts/adb-logs.ps1            # 实时看 DC/Guard、DC/A11y、DC/Home 判定日志
+pwsh -File scripts/adb-shot.ps1            # 截图到 screenshots/
+pwsh -File scripts/adb-smoke.ps1 -Mode block   # 时段外拉起王者，验证 2 秒内被弹回
+pwsh -File scripts/adb-smoke.ps1 -Mode warn    # 2 分钟提醒 + 1 分钟宽限，跑完整提醒→强制退出
+pwsh -File scripts/adb-smoke.ps1 -Mode count   # 连续打开 4 次验证次数限制
+pwsh -File scripts/adb-smoke.ps1 -Mode status  # 打印当前规则 / 今日用量 / 待生效修改
+```
+
+**仅 debug 构建**提供的调试广播（release 里 `DebugReceiver` 直接 return），方便不点 UI 就改规则：
+
+```powershell
+adb shell am broadcast -a com.discipline.control.DEBUG -e cmd reset-day
+adb shell am broadcast -a com.discipline.control.DEBUG -e cmd rule --es pkg com.tencent.tmgp.sgame `
+    --ei startHour 20 --ei endHour 23 --ei opens 3 --ei sessionMin 60 --ei graceMin 20 --ei gapMin 5
+adb shell am broadcast -a com.discipline.control.DEBUG -e cmd status
+```
+
+> 调试入口只在 debug 包里生效（`BuildConfig.DEBUG` 判断），正式发布包会关掉。
+
+## 七、后续可做（v0.2 候选）
 
 - 设备管理员加固（真正系统级隐藏 + 防卸载），做成可选开关
 - 桌面图标排序 / 分组 / 隐藏的系统应用入口
