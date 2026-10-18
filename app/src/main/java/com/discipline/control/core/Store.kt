@@ -110,10 +110,8 @@ object Store {
     // ---------------- 当日用量 ----------------
 
     fun logicalDate(nowMs: Long = System.currentTimeMillis()): LocalDate {
-        val dt = Instant.ofEpochMilli(nowMs).atZone(ZoneId.systemDefault())
-        var d = dt.toLocalDate()
-        if (dt.hour < config().resetHour) d = d.minusDays(1)
-        return d
+        val dt = Instant.ofEpochMilli(nowMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
+        return Engine.logicalDate(dt, config().resetHour)
     }
 
     fun day(): DayUsage {

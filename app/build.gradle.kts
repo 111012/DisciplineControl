@@ -11,8 +11,8 @@ android {
         applicationId = "com.discipline.control"
         minSdk = 26
         targetSdk = 33
-        versionCode = 9
-        versionName = "0.1.8"
+        versionCode = 10
+        versionName = "0.2.0"
     }
 
     signingConfigs {
@@ -67,6 +67,7 @@ dependencies {
         )
     )
 }
+
 
 
 

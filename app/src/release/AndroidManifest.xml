@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- release 包里彻底移除调试广播接收器（源码里也有 BuildConfig.DEBUG 兜底） -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application tools:node="merge">
+        <receiver
+            android:name=".service.DebugReceiver"
+            tools:node="remove" />
+    </application>
+</manifest>

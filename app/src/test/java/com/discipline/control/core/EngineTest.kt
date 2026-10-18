@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 import java.time.LocalDateTime
 
 /**
@@ -182,6 +183,35 @@ class EngineTest {
         assertFalse(Engine.isTransientPackage("com.tencent.tmgp.sgame"))
         assertFalse(Engine.isTransientPackage("com.discipline.control"))
         assertFalse(Engine.isTransientPackage("com.miui.securitycenter"))
+    }
+
+    // ---------------- 跨天 ----------------
+
+    @Test
+    fun logicalDayRollsAtResetHour() {
+        // 0 点重置：23:59 属于今天，00:01 属于明天
+        assertEquals(
+            LocalDate.of(2026, 10, 18),
+            Engine.logicalDate(LocalDateTime.of(2026, 10, 18, 23, 59), 0)
+        )
+        assertEquals(
+            LocalDate.of(2026, 10, 19),
+            Engine.logicalDate(LocalDateTime.of(2026, 10, 19, 0, 1), 0)
+        )
+        // 4 点重置：凌晨 3 点还算前一天，4 点整进入新一天
+        assertEquals(
+            LocalDate.of(2026, 10, 18),
+            Engine.logicalDate(LocalDateTime.of(2026, 10, 19, 3, 59), 4)
+        )
+        assertEquals(
+            LocalDate.of(2026, 10, 19),
+            Engine.logicalDate(LocalDateTime.of(2026, 10, 19, 4, 0), 4)
+        )
+        // 重置小时非法值不应炸：99 会被夹到 23，所以中午 12 点算"前一天"
+        assertEquals(
+            LocalDate.of(2026, 10, 17),
+            Engine.logicalDate(LocalDateTime.of(2026, 10, 18, 12, 0), 99)
+        )
     }
 
     // ---------------- 会话续接（决定会不会偷偷重新给满时长） ----------------

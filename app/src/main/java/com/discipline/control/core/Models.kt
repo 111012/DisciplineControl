@@ -288,6 +288,15 @@ enum class DenyReason {
 /** 打开次数/时长的判定，纯函数，方便在桌面预览与守护服务中共用 */
 object Engine {
 
+    /**
+     * 逻辑"天"：每天 [resetHour] 点之前算前一天。
+     * 抽成纯函数，跨天相关的行为不用等真机到 0 点也能单测。
+     */
+    fun logicalDate(now: LocalDateTime, resetHour: Int): LocalDate {
+        val d = now.toLocalDate()
+        return if (now.hour < resetHour.coerceIn(0, 23)) d.minusDays(1) else d
+    }
+
     /** 桌面是否显示该应用图标 */
     fun visibleInLauncher(rule: AppRule, usage: PkgUsage?, now: LocalDateTime): Boolean {
         if (!rule.enabled) return false
@@ -351,8 +360,7 @@ object Engine {
         return if (h == 0) "明天 0 点" else "明天 $h 点"
     }
 
-    /** 下一次开放的描述，例如 «今天 20:00» */
-    fun nextOpenText(rule: AppRule, now: LocalDateTime): String {
+    /** 下一次开放的描述，例如 «今天 20:00» */    fun nextOpenText(rule: AppRule, now: LocalDateTime): String {
         if (rule.windows.isEmpty()) return "（无可用时段）"
         var t = now.withSecond(0).withNano(0).plusMinutes(1)
         val names = arrayOf("一", "二", "三", "四", "五", "六", "日")

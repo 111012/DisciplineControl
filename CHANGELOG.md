@@ -2,8 +2,27 @@
 
 版本号对应 `app/build.gradle.kts` 的 `versionName` / `versionCode`。
 
-> v0.1.0–v0.1.8 **均已提交**。v0.1.4–v0.1.8 同属一个提交 `323c556`「v0.1.4-v0.1.8: 真机修复轮（含代码审查发现的 P0/P1）」，条目来自该提交说明与 `git show --stat`。
-> 当前版本 **v0.1.8 / versionCode 9**，产物 `dist/DisciplineControl-v0.1.8-debug.apk`（`dist/` 里只有这一个）。
+> v0.1.0–v0.2.0 **均已提交**。v0.1.4–v0.1.8 同属提交 `323c556`「v0.1.4-v0.1.8: 真机修复轮（含代码审查发现的 P0/P1）」，v0.2.0 为后续提交。
+> 当前版本 **v0.2.0 / versionCode 10**，产物 `dist/DisciplineControl-v0.2.0-release.apk`（日常用）/ `dist/DisciplineControl-v0.2.0-debug.apk`（调试用）。
+
+---
+
+## v0.2.0 — 2026-10-19（versionCode 10）
+
+首个 release 包 + 跨天逻辑抽纯函数。
+
+### 新增 / 修复
+
+- 新增 `Engine.logicalDate(now, resetHour)` 纯函数（非法重置小时夹到 0–23），`Store.logicalDate` 改为调用它；补单测覆盖 0 点 / 4 点重置边界，跨天行为不再依赖真机等 0 点
+- 真机验证「跨 0 点重置」：23:49 把当天次数消耗满 → 00:01 检查 `day={"date":"2026-10-19","apps":{}}`，次数清零、王者重新可见，规则本身保留
+- 正式产出 **release 包**（2.3 MB）：`android:debuggable` 关闭、无 `DebugReceiver`；与 debug 包同签名，可互相覆盖安装
+- `app/src/release/AndroidManifest.xml` 用 `tools:node="remove"` 在 release 清单里移除调试广播组件（源码另有 `BuildConfig.DEBUG` 兜底）
+
+### 构建 / 验证
+
+- `:app:assembleRelease` 通过；`apksigner verify` 证书与 debug 一致；`aapt dump badging` 无 debuggable 属性
+- 单测 **30 个**全绿（EngineTest 24 + ModelJsonTest 6）
+- release 包已覆盖安装到平板（versionName 0.2.0），默认桌面 / 无障碍 / 前台守护服务均正常，调试广播在 release 下无响应（符合预期）
 
 ---
 
