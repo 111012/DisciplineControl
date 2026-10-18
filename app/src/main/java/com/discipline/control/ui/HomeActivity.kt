@@ -3,19 +3,26 @@ package com.discipline.control.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -25,6 +32,10 @@ import com.discipline.control.core.AppRule
 import com.discipline.control.core.Apps
 import com.discipline.control.core.DayUsage
 import com.discipline.control.core.Engine
+import com.discipline.control.core.HomeItem
+import com.discipline.control.core.HomeLayout
+import com.discipline.control.core.HomeLayoutEngine
+import com.discipline.control.core.LauncherEntry
 import com.discipline.control.core.Notifier
 import com.discipline.control.core.Overlay
 import com.discipline.control.core.Pin
@@ -33,8 +44,10 @@ import com.discipline.control.core.Store
 import com.discipline.control.core.dp
 import com.discipline.control.service.GuardAccessibilityService
 import com.discipline.control.service.GuardService
+import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 
 class HomeActivity : AppCompatActivity() {
 
@@ -44,10 +57,16 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var tvFooter: TextView
     private lateinit var chipBox: LinearLayout
-    private lateinit var adapter: AppGridAdapter
+    private lateinit var ivWallpaper: ImageView
+    private lateinit var vScrim: View
+    private lateinit var adapter: HomeGridAdapter
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastMinute = -1
+    private val labels = HashMap<String, String>()
+    private val icons = HashMap<String, android.graphics.drawable.Drawable?>()
+    private var wallpaperBitmap: Bitmap? = null
+    private var loadedWallpaperPath: String = ""
 
     private val clockFmt = DateTimeFormatter.ofPattern("HH:mm")
     private val dayNames = arrayOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
@@ -74,21 +93,27 @@ class HomeActivity : AppCompatActivity() {
         tvStatus = findViewById(R.id.tvStatus)
         tvFooter = findViewById(R.id.tvFooter)
         chipBox = findViewById(R.id.chipBox)
+        ivWallpaper = findViewById(R.id.ivWallpaper)
+        vScrim = findViewById(R.id.vScrim)
         val btnSettings: ImageButton = findViewById(R.id.btnSettings)
 
-        adapter = AppGridAdapter(this)
+        adapter = HomeGridAdapter(this)
         grid.adapter = adapter
         grid.setOnItemClickListener { _, _, position, _ ->
-            launchApp(adapter.getItem(position).pkg)
+            when (val entry = adapter.getItem(position)) {
+                is LauncherEntry.AppEntry -> launchApp(entry.pkg)
+                is LauncherEntry.FolderEntry -> openFolder(entry.id)
+            }
         }
         grid.setOnItemLongClickListener { _, _, position, _ ->
-            showAppInfo(adapter.getItem(position).pkg)
+            when (val entry = adapter.getItem(position)) {
+                is LauncherEntry.AppEntry -> showAppMenu(entry.pkg)
+                is LauncherEntry.FolderEntry -> showFolderMenu(entry.id, entry.name)
+            }
             true
         }
 
-        btnSettings.setOnClickListener {
-            Pin.gate(this) { openSettings() }
-        }
+        btnSettings.setOnClickListener { Pin.gate(this) { openSettings() } }
         btnSettings.setOnLongClickListener {
             openSystemSettings()
             true
@@ -104,6 +129,7 @@ class HomeActivity : AppCompatActivity() {
         handler.removeCallbacks(ticker)
         handler.post(ticker)
         if (!GuardService.isRunning()) GuardService.startSafely(this)
+        applyWallpaper()
         refresh()
     }
 
@@ -125,17 +151,22 @@ class HomeActivity : AppCompatActivity() {
         val rules = Store.rules()
         val day = Store.day()
         val all = Apps.launchable(this)
-        val visible = ArrayList<AppEntry>(all.size)
+
+        labels.clear()
+        icons.clear()
+        all.forEach {
+            labels[it.pkg] = it.label
+            icons[it.pkg] = it.icon
+        }
+
+        val visible = HashSet<String>(all.size)
         for (e in all) {
             val rule = rules.firstOrNull { it.pkg == e.pkg && it.enabled }
-            if (rule == null) {
-                visible.add(e)
-            } else if (Engine.visibleInLauncher(rule, day.peek(e.pkg), now)) {
-                visible.add(e)
-            }
+            if (rule == null || Engine.visibleInLauncher(rule, day.peek(e.pkg), now)) visible.add(e.pkg)
         }
-        adapter.setData(visible)
-        android.util.Log.i("DC/Home", "refresh visible=${visible.size} hidden=${all.size - visible.size}")
+
+        val entries = HomeLayoutEngine.build(Store.layout(), labels, visible)
+        adapter.setData(entries, icons)
         rebuildStatus(rules, day, now)
         rebuildChips()
         rebuildFooter()
@@ -167,12 +198,8 @@ class HomeActivity : AppCompatActivity() {
         chipBox.removeAllViews()
         val needDefault = !isDefaultLauncher()
         val accEnabled = GuardAccessibilityService.isEnabled(this)
-        if (needDefault) {
-            addChip("① 设为默认桌面", true) { openHomeSettings() }
-        }
-        if (!accEnabled) {
-            addChip("② 开启无障碍拦截", true) { openAccessibilitySettings() }
-        }
+        if (needDefault) addChip("① 设为默认桌面", true) { openHomeSettings() }
+        if (!accEnabled) addChip("② 开启无障碍拦截", true) { openAccessibilitySettings() }
         if (Build.VERSION.SDK_INT >= 33 && !Notifier.canPost()) {
             addChip("③ 允许通知", true) { requestNotifPermissionIfNeeded() }
         }
@@ -204,7 +231,7 @@ class HomeActivity : AppCompatActivity() {
             tvFooter.text = "${lb.label} 已被拦下：${lb.text}"
             tvFooter.setTextColor(ContextCompat.getColor(this, R.color.warn))
         } else {
-            tvFooter.text = "长按图标查看应用信息 · 长按右上角进入系统设置"
+            tvFooter.text = "长按图标可分组 · 长按右上角进系统设置"
             tvFooter.setTextColor(ContextCompat.getColor(this, R.color.sub))
         }
     }
@@ -229,7 +256,189 @@ class HomeActivity : AppCompatActivity() {
         chipBox.addView(tv)
     }
 
+    // ---------------- 壁纸 ----------------
+
+    private fun applyWallpaper() {
+        val path = Store.layout().wallpaper
+        if (path.isEmpty() || !File(path).exists()) {
+            if (loadedWallpaperPath.isNotEmpty()) {
+                wallpaperBitmap = null
+                loadedWallpaperPath = ""
+            }
+            ivWallpaper.visibility = View.GONE
+            vScrim.visibility = View.GONE
+            return
+        }
+        if (path != loadedWallpaperPath || wallpaperBitmap == null) {
+            wallpaperBitmap = decodeWallpaper(path)
+            loadedWallpaperPath = path
+        }
+        val bmp = wallpaperBitmap
+        if (bmp == null) {
+            ivWallpaper.visibility = View.GONE
+            vScrim.visibility = View.GONE
+            return
+        }
+        ivWallpaper.setImageBitmap(bmp)
+        ivWallpaper.visibility = View.VISIBLE
+        vScrim.visibility = View.VISIBLE
+    }
+
+    /**
+     * 壁纸按"液态玻璃"处理：降采样 + 缩到极小再放大（任何 API 都能用的磨砂模糊），
+     * 输出约 1000px 宽，既省内存（原图 1800x2880 ARGB 要 20MB+）又有磨砂质感。
+     */
+    private fun decodeWallpaper(path: String): Bitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        var sample = 1
+        while (bounds.outWidth / sample > 1200 || bounds.outHeight / sample > 1200) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        val src = BitmapFactory.decodeFile(path, opts) ?: return@runCatching null
+        val tinyW = (src.width / 12).coerceAtLeast(16)
+        val tinyH = (src.height / 12).coerceAtLeast(16)
+        val tiny = Bitmap.createScaledBitmap(src, tinyW, tinyH, true)
+        val outW = src.width.coerceAtMost(1000)
+        val outH = (src.height * outW / src.width).coerceAtLeast(1)
+        val blurred = Bitmap.createScaledBitmap(tiny, outW, outH, true)
+        if (tiny !== src) tiny.recycle()
+        src.recycle()
+        blurred
+    }.getOrNull()
+
+    // ---------------- 长按菜单 ----------------
+
+    private fun showAppMenu(pkg: String) {
+        val layout = Store.layout()
+        val inFolder = layout.folderOf(pkg)
+        val actions = ArrayList<Pair<String, () -> Unit>>()
+        actions.add("移动到分组…" to { moveToFolder(pkg) })
+        if (inFolder == null) {
+            actions.add("新建分组并移入" to { createFolderWith(pkg) })
+        } else {
+            actions.add("移出分组（${inFolder.name}）" to {
+                Store.saveLayout(HomeLayoutEngine.removeFromFolder(Store.layout(), pkg))
+                refresh()
+                Toast.makeText(this, "已移出分组", Toast.LENGTH_SHORT).show()
+            })
+        }
+        actions.add("应用信息" to { showAppInfo(pkg) })
+        AlertDialog.Builder(this)
+            .setTitle(labels[pkg] ?: pkg)
+            .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showFolderMenu(folderId: String, name: String) {
+        val actions = listOf<Pair<String, () -> Unit>>(
+            "打开" to { openFolder(folderId) },
+            "重命名" to { promptRenameFolder(folderId, name) },
+            "解散分组" to { confirmDeleteFolder(folderId, name) }
+        )
+        AlertDialog.Builder(this)
+            .setTitle(name)
+            .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 编辑布局前先把"当前所有已安装应用"固化成布局，避免隐藏/新装应用导致顺序错乱 */
+    private fun editableLayout(): HomeLayout =
+        HomeLayoutEngine.materialize(Store.layout(), labels, labels.keys)
+
+    private fun moveToFolder(pkg: String) {
+        val folders = Store.layout().items.filterIsInstance<HomeItem.FolderItem>().map { it.folder }
+        if (folders.isEmpty()) {
+            createFolderWith(pkg)
+            return
+        }
+        val names = folders.map { it.name }.toMutableList()
+        names.add("＋ 新建分组…")
+        AlertDialog.Builder(this)
+            .setTitle("移动到分组")
+            .setItems(names.toTypedArray()) { _, which ->
+                if (which == folders.size) {
+                    createFolderWith(pkg)
+                } else {
+                    val layout = HomeLayoutEngine.addToFolder(editableLayout(), folders[which].id, pkg)
+                    Store.saveLayout(layout)
+                    refresh()
+                    Toast.makeText(this, "已移入「${folders[which].name}」", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun createFolderWith(pkg: String) {
+        val et = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            hint = "比如：游戏"
+            setSingleLine()
+        }
+        val box = FrameLayout(this).apply {
+            val pad = dp(20)
+            setPadding(pad, pad / 2, pad, 0)
+            addView(et)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("新建分组")
+            .setView(box)
+            .setPositiveButton("创建") { _, _ ->
+                val name = et.text.toString().trim().ifEmpty { "分组" }
+                val id = "f_" + UUID.randomUUID().toString().take(6)
+                val layout = HomeLayoutEngine.createFolder(editableLayout(), id, name, listOf(pkg))
+                Store.saveLayout(layout)
+                refresh()
+                Toast.makeText(this, "已创建分组「$name」", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun promptRenameFolder(folderId: String, current: String) {
+        val et = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(current)
+            setSingleLine()
+        }
+        val box = FrameLayout(this).apply {
+            val pad = dp(20)
+            setPadding(pad, pad / 2, pad, 0)
+            addView(et)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("重命名分组")
+            .setView(box)
+            .setPositiveButton("保存") { _, _ ->
+                val name = et.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    Store.saveLayout(HomeLayoutEngine.renameFolder(Store.layout(), folderId, name))
+                    refresh()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun confirmDeleteFolder(folderId: String, name: String) {
+        AlertDialog.Builder(this)
+            .setTitle("解散「$name」？")
+            .setMessage("组内应用会回到桌面，管控规则不受影响。")
+            .setPositiveButton("解散") { _, _ ->
+                Store.saveLayout(HomeLayoutEngine.deleteFolder(Store.layout(), folderId))
+                refresh()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
     // ---------------- 动作 ----------------
+
+    private fun openFolder(folderId: String) {
+        startActivity(Intent(this, FolderActivity::class.java).putExtra("folderId", folderId))
+    }
 
     private fun launchApp(pkg: String) {
         val intent = packageManager.getLaunchIntentForPackage(pkg)
@@ -278,10 +487,7 @@ class HomeActivity : AppCompatActivity() {
     private fun openOverlaySettings() {
         runCatching {
             startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
             )
         }
     }

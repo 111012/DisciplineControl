@@ -3,7 +3,32 @@
 版本号对应 `app/build.gradle.kts` 的 `versionName` / `versionCode`。
 
 > v0.1.0–v0.2.0 **均已提交**。v0.1.4–v0.1.8 同属提交 `323c556`「v0.1.4-v0.1.8: 真机修复轮（含代码审查发现的 P0/P1）」，v0.2.0 为后续提交。
-> 当前版本 **v0.2.1 / versionCode 11**，产物 `dist/DisciplineControl-v0.2.1-release.apk`（日常用）/ `dist/DisciplineControl-v0.2.1-debug.apk`（调试用）。
+> 当前版本 **v0.3.0 / versionCode 12**，产物 `dist/DisciplineControl-v0.3.0-release.apk`（日常用）/ `dist/DisciplineControl-v0.3.0-debug.apk`（调试用）。
+
+---
+
+## v0.3.0 — 2026-10-19（versionCode 12）
+
+桌面外观重做：液态玻璃 + 分组 + 壁纸。
+
+### 新增
+
+- **液态玻璃视觉**：磨砂玻璃卡片（半透明白渐变 + 1dp 高光描边 + 24dp 圆角）、玻璃胶囊、玻璃文件夹格子；页面底色改为多色光斑渐变（蓝/粉/绿/靛），卡片才有东西可"透"；图标文字加白色柔光阴影
+- **自定义壁纸**：设置 → 桌面外观 → 壁纸（系统相册 ACTION_PICK，MIUI 弹应用选择时选「相册」，可勾"下次默认"）；图片拷到应用私有目录，自动做磨砂模糊（降采样 + 小图放大，任何 Android 版本可用，输出 ≤1000px 省内存），并叠柔和渐变遮罩保证可读
+- **桌面分组**：长按应用 →「移动到分组…」/「新建分组并移入」；分组显示为玻璃文件夹格子，**原位替换**被移入图标（不再丢到列表末尾）；点开进入分组页，点图标启动、长按移出；移空自动消失
+- **分组管理页**：设置 → 桌面外观 → 分组管理，可重命名 / 解散（组内应用回桌面）
+
+### 实现要点
+
+- 新增 `core/HomeLayout.kt`：布局模型（条目顺序 + 壁纸路径 + 分组）+ `HomeLayoutEngine` 纯函数（合成渲染条目、隐藏/卸载剔除、空分组消失、新应用追加、原位创建分组、移入/移出/解散/重命名），全部可单测
+- 新增 `HomeLayoutTest` 11 个用例（含文件夹原位、隐藏剔除、JSON 往返等），单测合计 **42 个**
+- 新增 `HomeGridAdapter`（应用/文件夹双类型）、`FolderActivity`、`GroupManageActivity`
+- `Store` 增加 `layout()` / `saveLayout()`（JSON 持久化）
+
+### 验证
+
+- 真机（Pad 6 / Android 13）逐项点测：玻璃界面渲染、长按分组（原位出现）、分组页进入、分组管理解散、相册选壁纸 → 磨砂效果生效（`files/wallpaper.img` 321KB）、恢复默认背景
+- release 包覆盖安装（versionCode 12），默认桌面/无障碍/守护服务正常
 
 ---
 

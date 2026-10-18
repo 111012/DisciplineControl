@@ -29,6 +29,7 @@ object Store {
     private var cfgCache: GlobalConfig? = null
     private var ruleCache: MutableList<AppRule>? = null
     private var dayCache: DayUsage? = null
+    private var layoutCache: HomeLayout? = null
     private var pendingCache: MutableList<PendingChange>? = null
 
     fun init(ctx: Context) {
@@ -252,6 +253,23 @@ object Store {
         return applied
     }
 
+    // ---------------- 桌面布局（分组 / 壁纸） ----------------
+
+    fun layout(): HomeLayout {
+        var l = layoutCache
+        if (l == null) {
+            l = runCatching {
+                HomeLayout.fromJson(JSONObject(sp.getString("home_layout", "{}") ?: "{}"))
+            }.getOrElse { HomeLayout() }
+            layoutCache = l
+        }
+        return l
+    }
+
+    fun saveLayout(l: HomeLayout) {
+        layoutCache = l
+        sp.edit().putString("home_layout", l.toJson().toString()).apply()
+    }
     // ---------------- 其他 ----------------
 
     fun clearAll() {
@@ -259,6 +277,7 @@ object Store {
         cfgCache = null
         ruleCache = null
         dayCache = null
+        layoutCache = null
         pendingCache = null
     }
 }

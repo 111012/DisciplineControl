@@ -12,10 +12,12 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.discipline.control.BuildConfig
 import com.discipline.control.R
 import com.discipline.control.core.Apps
+import com.discipline.control.core.HomeItem
 import com.discipline.control.core.Notifier
 import com.discipline.control.core.Overlay
 import com.discipline.control.core.PendingChange
@@ -25,6 +27,7 @@ import com.discipline.control.core.Store
 import com.discipline.control.core.Utils
 import com.discipline.control.core.dp
 import com.discipline.control.service.GuardAccessibilityService
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,6 +73,7 @@ class SettingsActivity : AppCompatActivity() {
         renderPermissions()
         renderRules()
         renderGlobal()
+        renderAppearance()
         renderPending()
         renderPin()
         renderAbout()
@@ -332,6 +336,75 @@ class SettingsActivity : AppCompatActivity() {
             )
         )
         container.addView(card)
+    }
+
+    // ---------------- 桌面外观（壁纸 / 分组） ----------------
+
+    /** 用系统相册选择器（MIUI 上比 DocumentsUI 稳），拿到 uri 后拷成本地文件 */
+    private val pickWallpaperLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val uri = result.data?.data
+            if (uri == null) {
+                render()
+                return@registerForActivityResult
+            }
+            runCatching {
+                val target = File(filesDir, "wallpaper.img")
+                contentResolver.openInputStream(uri)?.use { input ->
+                    target.outputStream().use { out -> input.copyTo(out) }
+                }
+                if (!target.exists() || target.length() == 0L) error("读取图片失败")
+                Store.saveLayout(Store.layout().copy(wallpaper = target.absolutePath))
+                Toast.makeText(this, "壁纸已设置，回桌面看看", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(this, "设置壁纸失败：${it.message}", Toast.LENGTH_LONG).show()
+            }
+            render()
+        }
+
+    private fun renderAppearance() {
+        container.addView(Ui.sectionTitle(this, "桌面外观（液态玻璃）"))
+        val card = Ui.card(this)
+        val layout = Store.layout()
+        val hasWallpaper = layout.wallpaper.isNotEmpty() && File(layout.wallpaper).exists()
+        card.addView(
+            Ui.row(
+                this,
+                "壁纸",
+                if (hasWallpaper) "自定义壁纸已开启，会自动模糊成磨砂玻璃" else "默认渐变背景",
+                "选择"
+            ) { pickWallpaper() }
+        )
+        card.addView(Ui.divider(this))
+        card.addView(
+            Ui.row(this, "恢复默认背景", "去掉自定义壁纸", "恢复") {
+                Store.saveLayout(Store.layout().copy(wallpaper = ""))
+                Toast.makeText(this, "已恢复默认背景", Toast.LENGTH_SHORT).show()
+                render()
+            }
+        )
+        card.addView(Ui.divider(this))
+        val folderCount = layout.items.filterIsInstance<HomeItem.FolderItem>().size
+        card.addView(
+            Ui.row(this, "分组管理", "$folderCount 个分组 · 桌面长按图标可分组", "管理") {
+                startActivity(Intent(this, GroupManageActivity::class.java))
+            }
+        )
+        container.addView(card)
+    }
+
+    private fun pickWallpaper() {
+        val pick = Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+            .apply { type = "image/*" }
+        val ok = runCatching { pickWallpaperLauncher.launch(pick) }.isSuccess
+        if (ok) return
+        // 没有相册应用时退回系统文件选择器
+        val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+        }
+        runCatching { pickWallpaperLauncher.launch(fallback) }
+            .onFailure { Toast.makeText(this, "打不开图片选择器", Toast.LENGTH_SHORT).show() }
     }
 
     // ---------------- 动作 ----------------

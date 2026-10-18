@@ -1,4 +1,4 @@
-# 交付说明 · 自律控制（Discipline Control）v0.2.1
+# 交付说明 · 自律控制（Discipline Control）v0.3.0
 
 给小米平板用的**自律 / 家长控制** App：把指定应用（如王者荣耀）从桌面隐藏，只在设定时段可见；限制每日打开次数与单次时长；到点先提醒、再强制退回桌面。所有参数都能在 App 里改，没有写死。
 
@@ -12,8 +12,8 @@
 
 | 文件 | 用途 |
 |---|---|
-| `dist/DisciplineControl-v0.2.1-release.apk` | **日常用**。2.3 MB，无 debuggable、无调试广播 |
-| `dist/DisciplineControl-v0.2.1-debug.apk` | 调试/自动化验收用，带 `am broadcast` 调试命令 |
+| `dist/DisciplineControl-v0.3.0-release.apk` | **日常用**。2.3 MB，无 debuggable、无调试广播 |
+| `dist/DisciplineControl-v0.3.0-debug.apk` | 调试/自动化验收用，带 `am broadcast` 调试命令 |
 
 两者同一签名（`keystore/discipline.jks`），可互相覆盖升级，规则数据不丢。
 
@@ -75,6 +75,12 @@
 
 尚未在真机上验证（不影响主流程，需占用设备时补测）：开机自启（未重启验证）、统计页（未打开看过）、第②档悬浮横幅（默认关）、多时段第二段实际进入、真机上完整 60+20 分钟长跑。
 
+## 4.5 桌面外观（液态玻璃 / 分组 / 壁纸）
+
+- **壁纸**：设置 → 桌面外观 → 壁纸 → 选择 →（MIUI 会先问"用哪个应用打开"，选**相册**，可勾"下次默认"）→ 选一张图。图片会自动拷进应用私有目录并做磨砂模糊，回桌面即可看到玻璃效果。恢复默认：同页面 → 恢复。
+- **分组**：桌面**长按应用图标** → 「新建分组并移入」或「移动到分组…」。分组会以玻璃文件夹格子出现在原图标位置；点开是分组页（点图标启动、长按可移出）；组内应用全部移出后分组自动消失。
+- **分组管理**：设置 → 桌面外观 → 分组管理，可重命名 / 解散（解散后应用回桌面，管控规则不受影响）。
+
 ## 5. 已知限制（都是 Android/MIUI 层面绕不过的）
 
 1. **不是系统级隐藏**：本方案不用设备管理员，从最近任务点开受限应用会"闪一下"再被弹回。彻底隐藏需要一次性 ADB 配设备管理员（代价：卸载只能恢复出厂），没做。
@@ -102,4 +108,4 @@ $env:ANDROID_HOME='<repo>\.toolchain\android-sdk'
 | `scripts/adb-logs.ps1` / `scripts/adb-shot.ps1` | 实时日志 / 截图 |
 
 > 脚本需 `-ExecutionPolicy Bypass`（已存为 UTF-8 BOM）；调试广播仅 debug 包有效。
-> 代码结构、判定逻辑、单测（31 个）见 [README.md](README.md)；变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+> 代码结构、判定逻辑、单测（42 个）见 [README.md](README.md)；变更历史见 [CHANGELOG.md](CHANGELOG.md)。

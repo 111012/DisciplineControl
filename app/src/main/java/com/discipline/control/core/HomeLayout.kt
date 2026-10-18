@@ -1,0 +1,261 @@
+package com.discipline.control.core
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** 桌面上的一个条目：要么是单个应用，要么是分组（文件夹） */
+sealed class HomeItem {
+    data class AppItem(val pkg: String) : HomeItem()
+    data class FolderItem(val folder: HomeFolder) : HomeItem()
+}
+
+data class HomeFolder(val id: String, val name: String, val pkgs: List<String>)
+
+/**
+ * 桌面布局：条目顺序 + 壁纸路径。应用是否显示仍由管控规则决定（隐藏的应用不会出现在桌面/分组里）。
+ */
+data class HomeLayout(
+    val items: List<HomeItem> = emptyList(),
+    /** 自定义壁纸的本地文件绝对路径，空串 = 用默认背景 */
+    val wallpaper: String = ""
+) {
+
+    fun folderOf(pkg: String): HomeFolder? = items.filterIsInstance<HomeItem.FolderItem>()
+        .firstOrNull { it.folder.pkgs.contains(pkg) }?.folder
+
+    fun folder(folderId: String): HomeFolder? = items.filterIsInstance<HomeItem.FolderItem>()
+        .firstOrNull { it.folder.id == folderId }?.folder
+
+    fun toJson(): JSONObject {
+        val arr = JSONArray()
+        items.forEach { item ->
+            when (item) {
+                is HomeItem.AppItem -> arr.put(JSONObject().put("t", "app").put("pkg", item.pkg))
+                is HomeItem.FolderItem -> {
+                    val pkgs = JSONArray()
+                    item.folder.pkgs.forEach { pkgs.put(it) }
+                    arr.put(
+                        JSONObject()
+                            .put("t", "folder")
+                            .put("id", item.folder.id)
+                            .put("name", item.folder.name)
+                            .put("pkgs", pkgs)
+                    )
+                }
+            }
+        }
+        return JSONObject().put("items", arr).put("wallpaper", wallpaper)
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject): HomeLayout {
+            val items = ArrayList<HomeItem>()
+            val arr = o.optJSONArray("items")
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    val it = arr.optJSONObject(i) ?: continue
+                    when (it.optString("t")) {
+                        "app" -> {
+                            val pkg = it.optString("pkg")
+                            if (pkg.isNotEmpty()) items.add(HomeItem.AppItem(pkg))
+                        }
+
+                        "folder" -> {
+                            val pkgs = ArrayList<String>()
+                            val pa = it.optJSONArray("pkgs")
+                            if (pa != null) for (k in 0 until pa.length()) {
+                                val p = pa.optString(k)
+                                if (p.isNotEmpty()) pkgs.add(p)
+                            }
+                            items.add(
+                                HomeItem.FolderItem(
+                                    HomeFolder(
+                                        id = it.optString("id", "f_" + i),
+                                        name = it.optString("name", "分组"),
+                                        pkgs = pkgs
+                                    )
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            return HomeLayout(items = items, wallpaper = o.optString("wallpaper", ""))
+        }
+    }
+}
+
+/** 桌面最终渲染出来的条目 */
+sealed class LauncherEntry {
+    abstract val key: String
+
+    data class AppEntry(val pkg: String, val label: String) : LauncherEntry() {
+        override val key: String get() = "a:$pkg"
+    }
+
+    data class FolderEntry(val id: String, val name: String, val apps: List<AppEntry>) : LauncherEntry() {
+        override val key: String get() = "f:$id"
+    }
+}
+
+/**
+ * 布局合成逻辑（纯函数，可单测）：
+ * 保存的布局 + 当前安装列表 + 当前可见集合 → 桌面条目。
+ * 规则：隐藏/已卸载的剔除；空分组消失；没进过布局的新应用按名称追加末尾。
+ */
+object HomeLayoutEngine {
+
+    /** installed / visible 都用 pkg 集合表达，label 单独映射，避免把 Android 类型带进纯逻辑 */
+    fun build(
+        layout: HomeLayout,
+        labels: Map<String, String>,
+        visible: Set<String>
+    ): List<LauncherEntry> {
+        val placed = HashSet<String>()
+        val out = ArrayList<LauncherEntry>()
+        val labelOf = { pkg: String -> labels[pkg] ?: pkg }
+        val showable = { pkg: String -> visible.contains(pkg) && labels.containsKey(pkg) }
+
+        for (item in layout.items) {
+            when (item) {
+                is HomeItem.AppItem -> {
+                    if (showable(item.pkg) && placed.add(item.pkg)) {
+                        out.add(LauncherEntry.AppEntry(item.pkg, labelOf(item.pkg)))
+                    }
+                }
+
+                is HomeItem.FolderItem -> {
+                    val apps = item.folder.pkgs
+                        .filter { showable(it) && placed.add(it) }
+                        .map { LauncherEntry.AppEntry(it, labelOf(it)) }
+                    if (apps.isNotEmpty()) {
+                        out.add(LauncherEntry.FolderEntry(item.folder.id, item.folder.name, apps))
+                    }
+                }
+            }
+        }
+        // 新装的应用 / 新加入管控又解除的应用：按名称补到末尾
+        labels.keys.filter { visible.contains(it) && !placed.contains(it) }
+            .sortedBy { labelOf(it).lowercase() }
+            .forEach { out.add(LauncherEntry.AppEntry(it, labelOf(it))) }
+        return out
+    }
+
+    /** 把布局补齐成"当前所有可见应用都有位置"，再做增删改，避免顺序丢失 */
+    fun materialize(layout: HomeLayout, labels: Map<String, String>, visible: Set<String>): HomeLayout {
+        val items = build(layout, labels, visible).map { entry ->
+            when (entry) {
+                is LauncherEntry.AppEntry -> HomeItem.AppItem(entry.pkg)
+                is LauncherEntry.FolderEntry -> HomeItem.FolderItem(
+                    HomeFolder(entry.id, entry.name, entry.apps.map { it.pkg })
+                )
+            }
+        }
+        return layout.copy(items = items)
+    }
+
+    /**
+     * 新建分组并把 [pkgs] 放进去。
+     * 文件夹出现在第一个被移入应用原来的位置（安卓桌面的习惯），而不是被丢到列表末尾。
+     */
+    fun createFolder(layout: HomeLayout, id: String, name: String, pkgs: List<String>): HomeLayout {
+        val pkgSet = pkgs.toSet()
+        val out = ArrayList<HomeItem>()
+        var placed = false
+        layout.items.forEach { item ->
+            when (item) {
+                is HomeItem.AppItem -> {
+                    if (pkgSet.contains(item.pkg)) {
+                        if (!placed) {
+                            out.add(HomeItem.FolderItem(HomeFolder(id, name, pkgs)))
+                            placed = true
+                        }
+                    } else {
+                        out.add(item)
+                    }
+                }
+
+                is HomeItem.FolderItem -> {
+                    val left = item.folder.pkgs.filter { !pkgSet.contains(it) }
+                    if (left.isNotEmpty()) out.add(HomeItem.FolderItem(item.folder.copy(pkgs = left)))
+                }
+            }
+        }
+        if (!placed) out.add(HomeItem.FolderItem(HomeFolder(id, name, pkgs)))
+        return layout.copy(items = out)
+    }
+
+    /** 把应用移到已有分组里 */
+    fun addToFolder(layout: HomeLayout, folderId: String, pkg: String): HomeLayout {
+        val items = layout.items.map { item ->
+            when (item) {
+                is HomeItem.AppItem -> if (item.pkg == pkg) null else item
+                is HomeItem.FolderItem ->
+                    if (item.folder.id == folderId) {
+                        HomeItem.FolderItem(item.folder.copy(pkgs = item.folder.pkgs + pkg))
+                    } else if (item.folder.pkgs.contains(pkg)) {
+                        HomeItem.FolderItem(item.folder.copy(pkgs = item.folder.pkgs - pkg))
+                    } else {
+                        item
+                    }
+            }
+        }.filterNotNull()
+        return layout.copy(items = items)
+    }
+
+    /** 从分组里移出，回到桌面（追加到末尾） */
+    fun removeFromFolder(layout: HomeLayout, pkg: String): HomeLayout {
+        var moved = false
+        val items = layout.items.mapNotNull { item ->
+            when (item) {
+                is HomeItem.AppItem -> item
+                is HomeItem.FolderItem ->
+                    if (item.folder.pkgs.contains(pkg)) {
+                        moved = true
+                        val left = item.folder.pkgs - pkg
+                        if (left.isEmpty()) null else HomeItem.FolderItem(item.folder.copy(pkgs = left))
+                    } else {
+                        item
+                    }
+            }
+        }.toMutableList()
+        if (moved) items.add(HomeItem.AppItem(pkg))
+        return layout.copy(items = items)
+    }
+
+    /** 解散分组：组内应用全部回到桌面 */
+    fun deleteFolder(layout: HomeLayout, folderId: String): HomeLayout {
+        val out = ArrayList<HomeItem>()
+        layout.items.forEach { item ->
+            if (item is HomeItem.FolderItem && item.folder.id == folderId) {
+                item.folder.pkgs.forEach { out.add(HomeItem.AppItem(it)) }
+            } else {
+                out.add(item)
+            }
+        }
+        return layout.copy(items = out)
+    }
+
+    fun renameFolder(layout: HomeLayout, folderId: String, name: String): HomeLayout {
+        val items = layout.items.map { item ->
+            if (item is HomeItem.FolderItem && item.folder.id == folderId) {
+                HomeItem.FolderItem(item.folder.copy(name = name))
+            } else {
+                item
+            }
+        }
+        return layout.copy(items = items)
+    }
+
+    private fun removePkgs(items: List<HomeItem>, pkgs: Set<String>): List<HomeItem> {
+        return items.mapNotNull { item ->
+            when (item) {
+                is HomeItem.AppItem -> if (pkgs.contains(item.pkg)) null else item
+                is HomeItem.FolderItem -> {
+                    val left = item.folder.pkgs.filter { !pkgs.contains(it) }
+                    if (left.isEmpty()) null else HomeItem.FolderItem(item.folder.copy(pkgs = left))
+                }
+            }
+        }
+    }
+}
