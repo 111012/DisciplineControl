@@ -21,12 +21,16 @@ import com.discipline.control.core.Engine
 import com.discipline.control.core.Notifier
 import com.discipline.control.core.Overlay
 import com.discipline.control.core.PkgUsage
+import com.discipline.control.core.RemindStyle
 import com.discipline.control.core.Store
 import com.discipline.control.core.AppRule
 import java.time.LocalDateTime
 
 /** 桌面上用于提示"刚刚被拦截了"的事件 */
 data class BlockEvent(val pkg: String, val label: String, val text: String, val at: Long)
+
+/** 到点提醒事件：桌面用它显示"还剩 N 分钟" */
+data class WarnEvent(val pkg: String, val label: String, val remainMin: Long, val at: Long)
 
 /**
  * 守护服务：前台应用会话计时、到点提醒、超限强制退出、拦截。
@@ -126,22 +130,13 @@ class GuardService : Service() {
 
         val day = Store.day()
         val usage = day.peek(pkg)
-        val resuming = isResuming(rule, usage, now)
+        val resuming = Engine.isResumingSession(rule, usage, now)
         val deny = Engine.launchDeny(rule, usage, LocalDateTime.now(), sessionActive = resuming)
         if (deny != null) {
             block(rule, deny, now)
             return
         }
         startOrResumeSession(rule, resuming, now)
-    }
-
-    private fun isResuming(rule: AppRule, usage: PkgUsage?, now: Long): Boolean {
-        if (usage == null) return false
-        if (usage.finished) return false
-        if (usage.sessionMs <= 0L) return false
-        if (usage.lastExitAt <= 0L) return false
-        val gap = rule.countGapMin.coerceAtLeast(0) * 60_000L
-        return now - usage.lastExitAt <= gap
     }
 
     private fun startOrResumeSession(rule: AppRule, resuming: Boolean, now: Long) {
@@ -163,6 +158,7 @@ class GuardService : Service() {
         s.resumedAt = now
         session = s
         Overlay.hide()
+        if (!resuming) lastWarn = null
         refreshOngoing()
     }
 
@@ -235,8 +231,13 @@ class GuardService : Service() {
         val text = "已使用 ${elapsed / 60_000} 分钟，$remainMin 分钟后将强制退出"
         Notifier.notifyAlert(2001, rule.label + " 提醒", text)
         vibrate()
-        if (Store.config().warnOverlay) {
-            Overlay.showWarn(this, rule.label + "：" + text)
+        when (Store.config().remindStyle) {
+            RemindStyle.OVERLAY -> Overlay.showWarn(this, rule.label + "：" + text)
+            RemindStyle.HOME -> {
+                // 不覆盖游戏画面，直接退回桌面；桌面上会显示还剩多少分钟，点回去可以继续用完宽限
+                lastWarn = WarnEvent(rule.pkg, rule.label, remainMin, System.currentTimeMillis())
+                GuardAccessibilityService.goHome()
+            }
         }
     }
 
@@ -266,6 +267,7 @@ class GuardService : Service() {
         Store.saveDay(day)
         session = null
         Overlay.hide()
+        lastWarn = null
         block(rule, reason, now, forced = true)
         refreshOngoing()
     }
@@ -314,6 +316,9 @@ class GuardService : Service() {
 
         @Volatile
         var lastBlock: BlockEvent? = null
+
+        @Volatile
+        var lastWarn: WarnEvent? = null
 
         fun startSafely(ctx: Context) {
             runCatching {

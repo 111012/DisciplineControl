@@ -137,8 +137,8 @@ data class GlobalConfig(
     val pinHash: String = "",
     /** 放宽限制的修改需要等多少小时生效 */
     val relaxDelayHours: Int = 24,
-    /** 游戏内提醒是否使用悬浮横幅（有被游戏判定为辅助工具的风险） */
-    val warnOverlay: Boolean = false,
+    /** 到点提醒方式，见 RemindStyle */
+    val remindStyle: Int = RemindStyle.NOTIFY,
     val showStats: Boolean = true,
     val firstRunDone: Boolean = false
 ) {
@@ -149,20 +149,47 @@ data class GlobalConfig(
         .put("pinSalt", pinSalt)
         .put("pinHash", pinHash)
         .put("relaxDelayHours", relaxDelayHours)
-        .put("warnOverlay", warnOverlay)
+        .put("remindStyle", remindStyle)
         .put("showStats", showStats)
         .put("firstRunDone", firstRunDone)
 
     companion object {
-        fun fromJson(o: JSONObject): GlobalConfig = GlobalConfig(
-            resetHour = o.optInt("resetHour", 0),
-            pinSalt = o.optString("pinSalt", ""),
-            pinHash = o.optString("pinHash", ""),
-            relaxDelayHours = o.optInt("relaxDelayHours", 24),
-            warnOverlay = o.optBoolean("warnOverlay", false),
-            showStats = o.optBoolean("showStats", true),
-            firstRunDone = o.optBoolean("firstRunDone", false)
-        )
+        fun fromJson(o: JSONObject): GlobalConfig {
+            val style = if (o.has("remindStyle")) {
+                o.optInt("remindStyle", RemindStyle.NOTIFY)
+            } else if (o.optBoolean("warnOverlay", false)) {
+                RemindStyle.OVERLAY
+            } else {
+                RemindStyle.NOTIFY
+            }
+            return GlobalConfig(
+                resetHour = o.optInt("resetHour", 0),
+                pinSalt = o.optString("pinSalt", ""),
+                pinHash = o.optString("pinHash", ""),
+                relaxDelayHours = o.optInt("relaxDelayHours", 24),
+                remindStyle = style,
+                showStats = o.optBoolean("showStats", true),
+                firstRunDone = o.optBoolean("firstRunDone", false)
+            )
+        }
+    }
+}
+
+/** 到点提醒方式 */
+object RemindStyle {
+    /** 只用通知 + 震动（最安全） */
+    const val NOTIFY = 0
+
+    /** 通知 + 游戏内悬浮横幅（有被游戏反外挂误判的风险） */
+    const val OVERLAY = 1
+
+    /** 到点直接把用户退回桌面（最"砸脸"，但完全不覆盖游戏画面，零误判风险） */
+    const val HOME = 2
+
+    fun text(style: Int): String = when (style) {
+        OVERLAY -> "通知 + 游戏内悬浮横幅（有误判风险）"
+        HOME -> "到点先退回桌面（最强烈，不覆盖游戏画面）"
+        else -> "仅通知 + 震动（最安全，推荐）"
     }
 }
 
@@ -260,6 +287,21 @@ object Engine {
             return DenyReason.NO_OPENS_LEFT
         }
         return null
+    }
+
+    /**
+     * 重新进入受限应用时，是否算"接着上次的会话"：
+     * 不消耗次数、不把计时清零（宽限期内回来继续倒数）。
+     */
+    fun isResumingSession(rule: AppRule, usage: PkgUsage?, now: Long): Boolean {
+        if (usage == null) return false
+        if (usage.finished) return false
+        if (usage.sessionMs <= 0L) return false
+        // 已经提醒过、还在宽限期内：继续上次会话，绝不能重置计时
+        if (usage.warned) return true
+        if (usage.lastExitAt <= 0L) return false
+        val gap = rule.countGapMin.coerceAtLeast(0) * 60_000L
+        return now - usage.lastExitAt <= gap
     }
 
     fun denyText(reason: DenyReason, rule: AppRule, now: LocalDateTime): String = when (reason) {

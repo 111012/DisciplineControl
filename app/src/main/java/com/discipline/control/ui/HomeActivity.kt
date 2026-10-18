@@ -28,6 +28,7 @@ import com.discipline.control.core.Engine
 import com.discipline.control.core.Notifier
 import com.discipline.control.core.Overlay
 import com.discipline.control.core.Pin
+import com.discipline.control.core.RemindStyle
 import com.discipline.control.core.Store
 import com.discipline.control.core.dp
 import com.discipline.control.service.GuardAccessibilityService
@@ -173,8 +174,13 @@ class HomeActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= 33 && !Notifier.canPost()) {
             addChip("③ 允许通知", true) { requestNotifPermissionIfNeeded() }
         }
-        if (Store.config().warnOverlay && !Overlay.canDraw(this)) {
+        if (Store.config().remindStyle == RemindStyle.OVERLAY && !Overlay.canDraw(this)) {
             addChip("悬浮窗权限", true) { openOverlaySettings() }
+        }
+        val lw = GuardService.lastWarn
+        if (lw != null) {
+            val left = (lw.remainMin - (System.currentTimeMillis() - lw.at) / 60_000L).coerceAtLeast(0L)
+            if (left > 0) addChip("⏳ ${lw.label} 还剩 $left 分钟", true) {}
         }
         if (!needDefault && accEnabled && Store.rules().isEmpty()) {
             addChip("＋ 添加管控应用", false) { openSettings() }

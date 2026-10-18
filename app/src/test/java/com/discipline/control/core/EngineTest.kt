@@ -162,6 +162,30 @@ class EngineTest {
         assertTrue(Engine.isRelaxation(sg, sg.copy(countGapMin = 30)))
     }
 
+    // ---------------- 会话续接（决定会不会偷偷重新给满时长） ----------------
+
+    @Test
+    fun resumeWithinGap() {
+        val u = PkgUsage(opens = 2, sessionMs = 30 * 60_000L, lastExitAt = 1_000_000L)
+        assertTrue(Engine.isResumingSession(sg, u, 1_000_000L + 2 * 60_000L))
+        assertFalse(Engine.isResumingSession(sg, u, 1_000_000L + 6 * 60_000L))
+    }
+
+    @Test
+    fun warnedAlwaysResumesSoTimerNeverResets() {
+        // 到点提醒后被踢回桌面，过很久再回来：仍接着倒计时，而不是重新给 60 分钟
+        val u = PkgUsage(opens = 1, sessionMs = 61 * 60_000L, warned = true, lastExitAt = 0L)
+        assertTrue(Engine.isResumingSession(sg, u, 9_999_999_999L))
+    }
+
+    @Test
+    fun finishedNeverResumes() {
+        val u = PkgUsage(opens = 1, sessionMs = 61 * 60_000L, warned = true, finished = true)
+        assertFalse(Engine.isResumingSession(sg, u, 1L))
+        assertFalse(Engine.isResumingSession(sg, null, 1L))
+        assertFalse(Engine.isResumingSession(sg, PkgUsage(), 1L))
+    }
+
     @Test
     fun supersetCheck() {
         val big = listOf(TimeWindow(TimeWindow.EVERY_DAY, 0, 24 * 60))

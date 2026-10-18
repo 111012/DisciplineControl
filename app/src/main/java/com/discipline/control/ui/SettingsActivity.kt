@@ -20,6 +20,7 @@ import com.discipline.control.core.Notifier
 import com.discipline.control.core.Overlay
 import com.discipline.control.core.PendingChange
 import com.discipline.control.core.Pin
+import com.discipline.control.core.RemindStyle
 import com.discipline.control.core.Store
 import com.discipline.control.core.Utils
 import com.discipline.control.core.dp
@@ -232,15 +233,8 @@ class SettingsActivity : AppCompatActivity() {
         card.addView(Ui.divider(this))
 
         card.addView(
-            Ui.switchRow(
-                this,
-                "游戏内悬浮提醒",
-                if (cfg.warnOverlay) "已开启：到点会在游戏画面上方弹横幅（有被游戏判为辅助工具的风险）"
-                else "已关闭：只用通知 + 震动提醒（更安全，推荐）",
-                cfg.warnOverlay
-            ) { on ->
-                Store.saveConfig(Store.config().copy(warnOverlay = on))
-                Toast.makeText(this, if (on) "已开启悬浮提醒" else "已改用通知提醒", Toast.LENGTH_SHORT).show()
+            Ui.row(this, "到点提醒方式", RemindStyle.text(cfg.remindStyle), "修改") {
+                pickRemindStyle()
             }
         )
         card.addView(Ui.divider(this))
@@ -334,6 +328,31 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
         }
         render()
+    }
+
+    private fun pickRemindStyle() {
+        val labels = arrayOf(
+            "仅通知 + 震动（最安全，推荐）",
+            "通知 + 游戏内悬浮横幅（有被 ACE 误判为辅助工具的风险）",
+            "到点先退回桌面（最“砸脸”，完全不覆盖游戏画面）"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("到点提醒方式")
+            .setSingleChoiceItems(labels, Store.config().remindStyle) { dialog, which ->
+                Store.saveConfig(Store.config().copy(remindStyle = which))
+                dialog.dismiss()
+                render()
+                if (which == RemindStyle.OVERLAY && !Overlay.canDraw(this)) {
+                    AlertDialog.Builder(this)
+                        .setTitle("还需要悬浮窗权限")
+                        .setMessage("用这个提醒方式需要允许「显示在其他应用上层」。也可以改成第三种「到点先退回桌面」，效果更强烈且没有误判风险。")
+                        .setPositiveButton("去允许") { _, _ -> openOverlaySettings() }
+                        .setNegativeButton("再说", null)
+                        .show()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun pickNumber(title: String, options: List<Pair<String, Int>>, current: Int, onPick: (Int) -> Unit) {
