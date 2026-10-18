@@ -2,56 +2,91 @@
 
 版本号对应 `app/build.gradle.kts` 的 `versionName` / `versionCode`。
 
-> v0.1.0–v0.1.3 有 git 提交，条目来自 `git log` 与提交 diff。
-> v0.1.4–v0.1.6 **未单独提交**，条目按工作区改动时间与 v0.1.6 构建产物整理，版本归属无法从 commit 逐行核对。
+> v0.1.0–v0.1.8 **均已提交**。v0.1.4–v0.1.8 同属一个提交 `323c556`「v0.1.4-v0.1.8: 真机修复轮（含代码审查发现的 P0/P1）」，条目来自该提交说明与 `git show --stat`。
+> 当前版本 **v0.1.8 / versionCode 9**，产物 `dist/DisciplineControl-v0.1.8-debug.apk`（`dist/` 里只有这一个）。
+
+---
+
+## v0.1.8 — 2026-10-18（versionCode 9）
+
+代码审查（P0/P1）修复轮，7 组问题：
+
+### 修复
+
+- **P0：拦截去重把「回桌面」一起吞掉**。1.5 秒去重逻辑把 `goHome()` 也跳过：被弹回桌面后 1.5 秒内再点一次可绕过管控，而且会话不再计时。改为**去重只用于通知**，`goHome()` 无条件执行并清 `lastReconciledPkg`。
+- **关屏再亮屏后计时永久停摆**。`pauseSession` 没清前台去重状态，亮屏后同一包名被判为「没变化」而跳过。已在 pause 时清空去重状态。
+- **跨天把昨天时长记到今天并压死新一天**。`Session` 改为记录逻辑日期，跨天结算写回原日期；`saveDay` 改同步 `commit()`，不再用旧数据污染当天缓存。
+- **跨零点时段只认开始日**。只配「周一 22:00–02:00」时，周二 00:30 会被判成不在时段；改为按归属开始日判定（周二 00:30 属于周一那段）。
+- **待生效修改会回滚期间的收紧**。登记待生效修改时记录 base 快照，等待期内规则被再次修改则整条作废，不会等 N 小时后把后来的收紧覆盖回去。
+- **改「每天几点重置次数」可清空当天额度**。改为走放宽延迟生效，不能再靠改重置时间点立刻把当天次数清零。
+- **其它修复**：空/非数字输入不再静默当 0（0 = 不限）；规则 JSON 损坏回退 `rules_bak`；`goHome` 失败重试；`windows-changed` 探测 300ms 节流；桌面用 `GuardService.isRunning()` 判断守护是否真在跑；PIN 设置取消后关页面；overlay 在服务销毁时移除。
+
+### 构建
+
+- 版本号 `0.1.8` / `versionCode 9`。
+- 产物：`dist/DisciplineControl-v0.1.8-debug.apk`（`dist/` 里唯一的包）。
+- 单测 **29 个**全绿（`EngineTest` 23 + `ModelJsonTest` 6）。
+
+### 验证
+
+- 真机回归：P0 连续快速点开 3 次全部弹回、关屏/亮屏 `sessionMs` 不重置、待生效修改 30 秒内自动生效、无障碍被关 15 秒内告警并可从通知进 RepairActivity。详见 [docs/真机验证记录.md](docs/真机验证记录.md)。
+
+---
+
+## v0.1.7 — 2026-10-18（versionCode 8）
+
+### 新增
+
+- 无障碍被系统关掉时**主动告警**：检测到服务没了就发「拦截已失效 / 无障碍服务被系统关掉了，点这里一键修复」通知，常驻通知同步改成 ⚠ 文案。
+- 新增 `ui/RepairActivity` 一键修复页：**不需要 PIN**，只提供三个入口——开启无障碍 / 设为默认桌面 / 通知权限；进页面先列三项 ✅/❌ 当前状态。
+- 通知支持自定义 Intent（点「拦截已失效」直达 RepairActivity）。
+
+### 验证
+
+- 真机：手动关掉无障碍后 15 秒内弹通知，点通知能打开修复页。
 
 ---
 
 ## v0.1.6 — 2026-10-18（versionCode 7）
 
-### 新增
+### 文档
 
-- debug 广播 `config`：修改 `remindStyle`（0 通知 / 1 悬浮横幅 / 2 先回桌面）、`relaxDelayHours`、`resetHour`。
-- debug 广播 `set-usage`：直接设置今日 `opens` / `sessionMin` / `finished` / `warned`，不必真开 3 次游戏。
-- debug 广播 `pending-demo`：造一条 20 秒后生效的「放宽」修改，验证待生效链路。
-- `rule` 广播支持 `startMin` / `endMin`，可测分钟级时段边界。
+- README 补真机验证记录与「真机暴露的两个坑」。
+- 新建 `docs/真机验证记录.md`，`docs/验收测试清单.md` 逐项打勾，本次 CHANGELOG 补齐。
 
-### 修复
+### 说明
 
-- 计数间隔设为 0 时，至少保留 **10 秒**回归缓冲：MIUI 游戏加速等系统悬浮窗短暂抢焦点再回来，不再被算成新的一次打开（新增单测 `systemOverlayBlipNeverCountsAsNewOpen`）。
-
-### 构建
-
-- 版本号 `0.1.6` / `versionCode 7`。
-- 产物：`dist/DisciplineControl-v0.1.6-debug.apk`。
-- 单测 28 个全绿（`EngineTest` 22 + `ModelJsonTest` 6）。
-- 完成小米平板 6（Android 13 / MIUI V140）真机验证，详见 [docs/真机验证记录.md](docs/真机验证记录.md)。
+- 该版提交内容以文档与验证记录为主（代码仅版本号变化）。
 
 ---
 
-## v0.1.5 — 2026-10-18（versionCode 6，未提交）
+## v0.1.5 — 2026-10-18（versionCode 6）
+
+### 新增
+
+- debug 广播扩展：`config`（`remindStyle` / `relaxDelayHours` / `resetHour`）、`set-usage`（直接写今日 `opens` / `sessionMin` / `finished` / `warned`）。
+- `rule` 广播支持 `startMin` / `endMin`，可测分钟级时段边界；新增 `pending-demo`（造一条 20 秒后生效的放宽修改）。
 
 ### 修复
 
-- **MIUI 窗口抢焦点导致计时卡死**：拉起游戏时 MIUI 插入 `com.miui.securitycenter` 窗口，会话被暂停后游戏回前台不再发窗口事件。改为双通道：
+- **会话回归缓冲**：计数间隔设 0 时也保留 **10 秒最小缓冲**，系统悬浮窗（如 MIUI 游戏加速 `com.miui.securitycenter`）闪一下不再算成新一次打开。新增单测 `systemOverlayBlipNeverCountsAsNewOpen`。
+
+---
+
+## v0.1.4 — 2026-10-18（versionCode 5）
+
+### 修复
+
+- **前台监听双通道**，修复「MIUI 游戏加速 `com.miui.securitycenter` 抢焦点后、游戏回前台不发窗口事件 → 计时卡死」：
   - 无障碍事件增加 `TYPE_WINDOWS_CHANGED`；
   - `GuardService` 每 2 秒主动查询 `rootInActiveWindow` 包名兜底；
-  - `lastReconciledPkg` 去重，避免同一前台包名重复处理。
-- 无障碍配置改为 `typeWindowStateChanged|typeWindowsChanged`、`flagRetrieveInteractiveWindows`、`canRetrieveWindowContent=true`，支持主动查询焦点窗口。
+  - 无障碍配置改为 `typeWindowStateChanged|typeWindowsChanged` + `flagRetrieveInteractiveWindows` + `canRetrieveWindowContent=true`；
+  - `lastReconciledPkg` 去重，同一前台包名不重复处理。
+- `scripts/*.ps1` 改为 UTF-8 BOM（兼容 Windows PowerShell 5.1）；`adb-deploy.ps1` 变量 `$home` 改名 `$homeComp`（与只读自动变量 `$HOME` 冲突）。
 
 ### 验证
 
-- 真机修复后会话不再卡在暂停态，1 分钟 + 宽限 1 分钟链路正常走到 warn / finish。
-
----
-
-## v0.1.4 — 2026-10-18（versionCode 5，未提交）
-
-### 修复
-
-- `scripts/*.ps1` 改为 **UTF-8 BOM**，兼容 Windows PowerShell 5.1（无 BOM 时中文与脚本解析异常）。
-- `scripts/adb-deploy.ps1` 变量 `$home` 改名 `$homeComp`：PowerShell 变量名不区分大小写，`$home` 与只读自动变量 `$HOME` 冲突。
-- 真机首次 adb 部署跑通：安装、默认桌面、无障碍、电池白名单、通知权限。
+- 真机：会话不再卡在暂停态，1 分钟 + 宽限 1 分钟正常走到 warn / finish。
 
 ---
 
