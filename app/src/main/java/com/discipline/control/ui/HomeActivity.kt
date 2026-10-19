@@ -17,6 +17,9 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
+import android.view.animation.OvershootInterpolator
 import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -29,6 +32,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -66,7 +70,10 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var tvClock: TextView
     private lateinit var tvDate: TextView
     private lateinit var tvStatus: TextView
-    private lateinit var tvFooter: TextView
+    private lateinit var dockBar: LinearLayout
+    private var lastDragCenterX = 0f
+    private var lastDragCenterY = 0f
+    private var visiblePkgs: Set<String> = emptySet()
     private lateinit var chipBox: LinearLayout
     private lateinit var ivWallpaper: ImageView
     private lateinit var vScrim: View
@@ -102,7 +109,7 @@ class HomeActivity : AppCompatActivity() {
         tvClock = findViewById(R.id.tvClock)
         tvDate = findViewById(R.id.tvDate)
         tvStatus = findViewById(R.id.tvStatus)
-        tvFooter = findViewById(R.id.tvFooter)
+        dockBar = findViewById(R.id.dockBar)
         chipBox = findViewById(R.id.chipBox)
         ivWallpaper = findViewById(R.id.ivWallpaper)
         vScrim = findViewById(R.id.vScrim)
@@ -171,11 +178,13 @@ class HomeActivity : AppCompatActivity() {
             if (rule == null || Engine.visibleInLauncher(rule, day.peek(e.pkg), now)) visible.add(e.pkg)
         }
 
+        visiblePkgs = visible
+        seedDockIfBrandNew()
         val entries = HomeLayoutEngine.build(Store.layout(), labels, visible)
         adapter.setData(entries, icons)
         rebuildStatus(rules, day, now)
         rebuildChips()
-        rebuildFooter()
+        renderDock()
     }
 
     private fun rebuildStatus(rules: List<AppRule>, day: DayUsage, now: LocalDateTime) {
@@ -229,16 +238,9 @@ class HomeActivity : AppCompatActivity() {
         if (!needDefault && accEnabled && running && Store.rules().isNotEmpty()) {
             addChip("守护运行中", false) {}
         }
-    }
-
-    private fun rebuildFooter() {
         val lb = GuardService.lastBlock
         if (lb != null && System.currentTimeMillis() - lb.at < 90_000L) {
-            tvFooter.text = "${lb.label} 已被拦下：${lb.text}"
-            tvFooter.setTextColor(ContextCompat.getColor(this, R.color.warn))
-        } else {
-            tvFooter.text = "长按图标拖到另一个图标上即可建文件夹 · 长按松手弹菜单"
-            tvFooter.setTextColor(ContextCompat.getColor(this, R.color.sub))
+            addChip("${lb.label} 已被拦下", true) {}
         }
     }
 
@@ -369,7 +371,6 @@ class HomeActivity : AppCompatActivity() {
                 val from = viewHolder.bindingAdapterPosition
                 val to = target.bindingAdapterPosition
                 if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false
-                // 已经判定为"要合并"时不再交换，等松手建文件夹
                 if (mergeTargetKey != null) return false
                 adapter.moveItem(from, to)
                 dragMoved = true
@@ -386,6 +387,14 @@ class HomeActivity : AppCompatActivity() {
                     mergeTargetKey = null
                     hoverKey = null
                     hoverSince = 0L
+                    lastDragCenterX = 0f
+                    lastDragCenterY = 0f
+                    // 抬起：放大 + 抬高原阴影 + 轻微透明，接近原生桌面手感
+                    viewHolder?.itemView?.let { v ->
+                        v.elevation = dp(18).toFloat()
+                        v.animate().scaleX(1.12f).scaleY(1.12f).alpha(0.92f).setDuration(120).start()
+                    }
+                    recycler.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 }
             }
 
@@ -402,6 +411,24 @@ class HomeActivity : AppCompatActivity() {
                 if (!isCurrentlyActive) return
                 val dragged = adapter.itemAt(viewHolder.bindingAdapterPosition) ?: return
                 val view = viewHolder.itemView
+                val cx = view.left + dX + view.width / 2f
+                val cy = view.top + dY + view.height / 2f
+                lastDragCenterX = cx
+                lastDragCenterY = cy
+
+                // 悬到 Dock 上：Dock 放大提示可以放进去
+                if (dragged is LauncherEntry.AppEntry && isOverDock(cx, cy)) {
+                    dockBar.scaleX = 1.08f
+                    dockBar.scaleY = 1.08f
+                    if (mergeTargetKey != null) {
+                        mergeTargetKey = null
+                        adapter.setMergeTarget(null)
+                    }
+                    return
+                }
+                dockBar.scaleX = 1f
+                dockBar.scaleY = 1f
+
                 // 文件夹只支持排序，不参与合并
                 if (dragged !is LauncherEntry.AppEntry) {
                     if (mergeTargetKey != null) {
@@ -410,8 +437,6 @@ class HomeActivity : AppCompatActivity() {
                     }
                     return
                 }
-                val cx = view.left + dX + view.width / 2f
-                val cy = view.top + dY + view.height / 2f
                 val hit = hitTestTarget(recyclerView, view, cx, cy)
                 val now = SystemClock.uptimeMillis()
                 if (hit != hoverKey) {
@@ -431,19 +456,28 @@ class HomeActivity : AppCompatActivity() {
                 val moved = dragMoved
                 val targetKey = mergeTargetKey
                 val startKey = dragStartKey
+                val droppedOnDock = isOverDock(lastDragCenterX, lastDragCenterY)
                 dragMoved = false
                 mergeTargetKey = null
                 hoverKey = null
                 hoverSince = 0L
                 dragStartKey = null
                 adapter.setMergeTarget(null)
+                dockBar.scaleX = 1f
+                dockBar.scaleY = 1f
+                viewHolder.itemView.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(130).start()
+                viewHolder.itemView.elevation = 0f
                 val current = startKey?.let { k -> adapter.entries().firstOrNull { it.key == k } }
                     ?: adapter.entries().getOrNull(viewHolder.bindingAdapterPosition)
+                val anchor = viewHolder.itemView
                 when {
                     current == null -> Unit
+                    droppedOnDock && current is LauncherEntry.AppEntry -> moveAppToDock(current.pkg)
                     targetKey != null && current is LauncherEntry.AppEntry -> mergeAppInto(current.pkg, targetKey)
-                    !moved && current is LauncherEntry.AppEntry -> showAppMenu(current.pkg)
-                    !moved && current is LauncherEntry.FolderEntry -> showFolderMenu(current.id, current.name)
+                    !moved && current is LauncherEntry.AppEntry ->
+                        recycler.post { showAppMenu(current.pkg, anchor) }
+                    !moved && current is LauncherEntry.FolderEntry ->
+                        recycler.post { showFolderMenu(current.id, current.name, anchor) }
                     else -> persistDisplayOrder()
                 }
             }
@@ -451,6 +485,20 @@ class HomeActivity : AppCompatActivity() {
         ItemTouchHelper(callback).attachToRecyclerView(recycler)
     }
 
+    /** 拖拽中心是否落在 Dock 栏范围内（略微放宽，符合"甩进去"的手感） */
+    private fun isOverDock(cx: Float, cy: Float): Boolean {
+        if (!::dockBar.isInitialized || dockBar.visibility != View.VISIBLE) return false
+        if (cx <= 0f && cy <= 0f) return false
+        val rvLoc = IntArray(2)
+        recycler.getLocationOnScreen(rvLoc)
+        val sx = rvLoc[0] + cx
+        val sy = rvLoc[1] + cy
+        val dLoc = IntArray(2)
+        dockBar.getLocationOnScreen(dLoc)
+        val pad = dp(18)
+        return sx >= dLoc[0] - pad && sx <= dLoc[0] + dockBar.width + pad &&
+            sy >= dLoc[1] - pad && sy <= dLoc[1] + dockBar.height + pad
+    }
     /** 拖拽视觉中心命中的目标 key（半径约 0.45 格宽，参考 Launcher3 的 folderCreationRadius） */
     private fun hitTestTarget(
         recyclerView: RecyclerView,
@@ -477,6 +525,7 @@ class HomeActivity : AppCompatActivity() {
         val merged = HomeLayoutEngine.mergeIntoFolder(editableLayout(), draggedPkg, targetKey, folderId, "文件夹")
         Store.saveLayout(merged)
         refresh()
+        if (!targetKey.startsWith("f:")) animateFolderAppear(folderId)
         Toast.makeText(
             this,
             if (targetKey.startsWith("f:")) "已加入文件夹" else "已创建文件夹",
@@ -509,43 +558,166 @@ class HomeActivity : AppCompatActivity() {
             outRect.bottom = v / 2
         }
     }
+    // ---------------- Dock 栏 / 手感细节 ----------------
+
+    /** 全新安装（没有布局也没有 Dock）时，给 Dock 播种几个常用应用 */
+    private fun seedDockIfBrandNew() {
+        val layout = Store.layout()
+        if (layout.dock.isNotEmpty() || layout.items.isNotEmpty()) return
+        val installed = labels.keys
+        val preferred = listOf(
+            "com.tencent.mm",
+            "com.tencent.mobileqq",
+            "com.tencent.mtt",
+            "com.android.fileexplorer",
+            "com.miui.player",
+            "com.android.chrome"
+        )
+        val candidates = preferred.filter { installed.contains(it) } +
+            installed.filter { !preferred.contains(it) }.sorted()
+        if (candidates.isEmpty()) return
+        Store.saveLayout(HomeLayoutEngine.seedDockIfEmpty(layout, candidates))
+    }
+
+    private fun renderDock() {
+        dockBar.removeAllViews()
+        val layout = Store.layout()
+        val shown = layout.dock.filter { labels.containsKey(it) && visiblePkgs.contains(it) }
+        if (shown.isEmpty()) {
+            dockBar.visibility = View.GONE
+            return
+        }
+        dockBar.visibility = View.VISIBLE
+        shown.forEach { pkg -> dockBar.addView(buildDockItem(pkg)) }
+    }
+
+    private fun buildDockItem(pkg: String): View {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = ContextCompat.getDrawable(this@HomeActivity, R.drawable.bg_dock_item)
+            isClickable = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        val iv = ImageView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(46))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            icons[pkg]?.let { setImageDrawable(it) } ?: setImageResource(R.drawable.ic_launcher)
+        }
+        container.addView(iv)
+        container.setOnClickListener { launchApp(pkg) }
+        container.setOnLongClickListener {
+            showAppMenu(pkg, container)
+            true
+        }
+        animatePressFeedback(container)
+        return container
+    }
+
+    /** 按下微缩、抬手回弹：手机桌面的图标触感 */
+    private fun animatePressFeedback(view: View) {
+        view.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN ->
+                    v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(70).start()
+
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(130).start()
+            }
+            false
+        }
+    }
+
+    /** 拖到 Dock：加入 Dock 并从网格移除 */
+    private fun moveAppToDock(pkg: String) {
+        val layout = Store.layout()
+        if (HomeLayoutEngine.isInDock(layout, pkg)) return
+        if (layout.dock.size >= HomeLayoutEngine.dockMax()) {
+            Toast.makeText(this, "Dock 栏已满（最多 ${HomeLayoutEngine.dockMax()} 个）", Toast.LENGTH_SHORT).show()
+            refresh()
+            return
+        }
+        Store.saveLayout(HomeLayoutEngine.moveToDock(layout, pkg))
+        refresh()
+        dockBar.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        Toast.makeText(this, "已添加到 Dock", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 新建文件夹后让它带弹性地"弹"出来，避免生硬 */
+    private fun animateFolderAppear(folderId: String) {
+        recycler.post {
+            val pos = adapter.indexOfKey("f:" + folderId)
+            if (pos < 0) return@post
+            val vh = recycler.findViewHolderForAdapterPosition(pos) ?: return@post
+            val v = vh.itemView
+            v.scaleX = 0.5f
+            v.scaleY = 0.5f
+            v.alpha = 0f
+            v.animate()
+                .scaleX(1f).scaleY(1f).alpha(1f)
+                .setInterpolator(OvershootInterpolator(1.8f))
+                .setDuration(280)
+                .start()
+        }
+    }
     // ---------------- 长按菜单 ----------------
 
-    private fun showAppMenu(pkg: String) {
+    private fun showAppMenu(pkg: String, anchor: View) {
         val layout = Store.layout()
+        val inDock = HomeLayoutEngine.isInDock(layout, pkg)
         val inFolder = layout.folderOf(pkg)
-        val actions = ArrayList<Pair<String, () -> Unit>>()
-        actions.add("移动到分组…" to { moveToFolder(pkg) })
+        val popup = PopupMenu(this, anchor)
+        val actions = ArrayList<() -> Unit>()
+        fun add(label: String, action: () -> Unit) {
+            popup.menu.add(0, actions.size, actions.size, label)
+            actions.add(action)
+        }
+        add("移动到分组…") { moveToFolder(pkg) }
         if (inFolder == null) {
-            actions.add("新建分组并移入" to { createFolderWith(pkg) })
+            add("新建分组并移入") { createFolderWith(pkg) }
         } else {
-            actions.add("移出分组（${inFolder.name}）" to {
+            add("移出分组（${inFolder.name}）") {
                 Store.saveLayout(HomeLayoutEngine.removeFromFolder(Store.layout(), pkg))
                 refresh()
                 Toast.makeText(this, "已移出分组", Toast.LENGTH_SHORT).show()
-            })
+            }
         }
-        actions.add("应用信息" to { showAppInfo(pkg) })
-        AlertDialog.Builder(this)
-            .setTitle(labels[pkg] ?: pkg)
-            .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
-            .setNegativeButton("取消", null)
-            .show()
+        if (inDock) {
+            add("从 Dock 移除") {
+                Store.saveLayout(HomeLayoutEngine.removeFromDock(Store.layout(), pkg))
+                refresh()
+                Toast.makeText(this, "已从 Dock 移除", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            add("添加到 Dock") { moveAppToDock(pkg) }
+        }
+        add("应用信息") { showAppInfo(pkg) }
+        popup.setOnMenuItemClickListener { item ->
+            actions.getOrNull(item.itemId)?.invoke()
+            true
+        }
+        popup.show()
     }
 
-    private fun showFolderMenu(folderId: String, name: String) {
-        val actions = listOf<Pair<String, () -> Unit>>(
-            "打开" to { openFolder(folderId) },
-            "重命名" to { promptRenameFolder(folderId, name) },
-            "解散分组" to { confirmDeleteFolder(folderId, name) }
-        )
-        AlertDialog.Builder(this)
-            .setTitle(name)
-            .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
-            .setNegativeButton("取消", null)
-            .show()
+    private fun showFolderMenu(folderId: String, name: String, anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add(0, 0, 0, "打开")
+        popup.menu.add(0, 1, 1, "重命名")
+        popup.menu.add(0, 2, 2, "解散分组")
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                0 -> openFolder(folderId)
+                1 -> promptRenameFolder(folderId, name)
+                2 -> confirmDeleteFolder(folderId, name)
+            }
+            true
+        }
+        popup.show()
     }
-
     /** 编辑布局前先把"当前所有已安装应用"固化成布局，避免隐藏/新装应用导致顺序错乱 */
     private fun editableLayout(): HomeLayout =
         HomeLayoutEngine.materialize(Store.layout(), labels, labels.keys)
@@ -641,6 +813,8 @@ class HomeActivity : AppCompatActivity() {
 
     private fun openFolder(folderId: String) {
         startActivity(Intent(this, FolderActivity::class.java).putExtra("folderId", folderId))
+        // 像 iOS/安卓桌面那样缩放进入分组，避免生硬
+        overridePendingTransition(R.anim.folder_in, R.anim.folder_out)
     }
 
     private fun launchApp(pkg: String) {

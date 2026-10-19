@@ -3,10 +3,28 @@
 版本号对应 `app/build.gradle.kts` 的 `versionName` / `versionCode`。
 
 > v0.1.0–v0.2.0 **均已提交**。v0.1.4–v0.1.8 同属提交 `323c556`「v0.1.4-v0.1.8: 真机修复轮（含代码审查发现的 P0/P1）」，v0.2.0 为后续提交。
-> 当前版本 **v0.4.0 / versionCode 13**，产物 `dist/DisciplineControl-v0.4.0-release.apk`（日常用）/ `dist/DisciplineControl-v0.4.0-debug.apk`（调试用）。
+> 当前版本 **v0.5.0 / versionCode 14**，产物 `dist/DisciplineControl-v0.5.0-release.apk`（日常用）/ `dist/DisciplineControl-v0.5.0-debug.apk`（调试用）。
 
 ---
 
+## v0.5.0 — 2026-10-19（versionCode 14）
+
+按手机桌面习惯重做交互手感：Dock 栏 + 动效 + 系统式菜单。
+
+### 新增
+
+- **底部 Dock 栏**：毛玻璃胶囊，固定最多 5 个常用应用（全新安装自动放入微信/QQ/浏览器/文件管理）；Dock 里的应用不再重复出现在网格；把网格图标**拖到 Dock 上松手即加入**（拖拽时 Dock 会放大提示）；长按 Dock 图标 → 「从 Dock 移除」；Dock 应用同样受管控规则约束（被隐身时不显示）
+- **手感动画**：图标按下微缩 0.94 / 抬手回弹；长按拖动时抬起放大 1.12 + 抬高阴影 + 轻微透明 + **震动反馈**；新建文件夹带 Overshoot 弹性"弹"出来；进入/退出分组用缩放+淡入淡出过渡（`overridePendingTransition`）
+- **系统式 PopupMenu**：长按图标/文件夹改为贴着图标弹出的原生菜单（不再用占满屏的大对话框）
+- **去掉教程式常驻文字**：底部"长按图标拖到…"提示删除；拦截提示改为状态胶囊里的一条 chip
+- 布局数据新增 `dock` 字段（JSON 持久化），`HomeLayoutEngine` 新增 `moveToDock / removeFromDock / seedDockIfEmpty` 纯函数 + 5 个单测
+
+### 验证
+
+- 真机（Pad 6 / Android 13）：Dock 渲染与默认播种 ✅、长按 Dock 图标 PopupMenu ✅、从 Dock 移除后回到网格 ✅、拖拽加入 Dock ✅、拖拽合并建文件夹回归 ✅（布局里生成 `folder [小米视频, 天气]`）
+- 单测 **52 个**全绿（EngineTest 25 + HomeLayoutTest 21 + ModelJsonTest 6）；versionCode 14
+
+---
 ## v0.4.0 — 2026-10-19（versionCode 13）
 
 桌面交互对齐 iOS/安卓桌面：拖拽建文件夹 + 壁纸原图分辨率。

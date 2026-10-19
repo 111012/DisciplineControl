@@ -3,6 +3,7 @@ package com.discipline.control.ui
 import android.content.Context
 import android.graphics.drawable.Drawable
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
@@ -76,6 +77,18 @@ class HomeGridAdapter(
         val entry = data[position]
         val view = holder.itemView
         view.setOnClickListener { onClick(entry) }
+
+        // 按压微缩：手机桌面的点按手感
+        view.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN ->
+                    v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(70).start()
+
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+            }
+            false
+        }
 
         val highlighted = entry.key == mergeTargetKey
         view.background = ContextCompat.getDrawable(

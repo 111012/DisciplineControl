@@ -17,7 +17,9 @@ data class HomeFolder(val id: String, val name: String, val pkgs: List<String>)
 data class HomeLayout(
     val items: List<HomeItem> = emptyList(),
     /** 自定义壁纸的本地文件绝对路径，空串 = 用默认背景 */
-    val wallpaper: String = ""
+    val wallpaper: String = "",
+    /** 底部 Dock 栏固定的应用（最多 5 个），Dock 里的应用不再出现在上面的网格里 */
+    val dock: List<String> = emptyList()
 ) {
 
     fun folderOf(pkg: String): HomeFolder? = items.filterIsInstance<HomeItem.FolderItem>()
@@ -44,7 +46,9 @@ data class HomeLayout(
                 }
             }
         }
-        return JSONObject().put("items", arr).put("wallpaper", wallpaper)
+        val dockArr = JSONArray()
+        dock.forEach { dockArr.put(it) }
+        return JSONObject().put("items", arr).put("wallpaper", wallpaper).put("dock", dockArr)
     }
 
     companion object {
@@ -80,7 +84,13 @@ data class HomeLayout(
                     }
                 }
             }
-            return HomeLayout(items = items, wallpaper = o.optString("wallpaper", ""))
+            val dock = ArrayList<String>()
+            val dockArr = o.optJSONArray("dock")
+            if (dockArr != null) for (i in 0 until dockArr.length()) {
+                val pkg = dockArr.optString(i)
+                if (pkg.isNotEmpty()) dock.add(pkg)
+            }
+            return HomeLayout(items = items, wallpaper = o.optString("wallpaper", ""), dock = dock)
         }
     }
 }
@@ -112,6 +122,7 @@ object HomeLayoutEngine {
         visible: Set<String>
     ): List<LauncherEntry> {
         val placed = HashSet<String>()
+        val dockSet = layout.dock.toSet()
         val out = ArrayList<LauncherEntry>()
         val labelOf = { pkg: String -> labels[pkg] ?: pkg }
         val showable = { pkg: String -> visible.contains(pkg) && labels.containsKey(pkg) }
@@ -119,7 +130,7 @@ object HomeLayoutEngine {
         for (item in layout.items) {
             when (item) {
                 is HomeItem.AppItem -> {
-                    if (showable(item.pkg) && placed.add(item.pkg)) {
+                    if (!dockSet.contains(item.pkg) && showable(item.pkg) && placed.add(item.pkg)) {
                         out.add(LauncherEntry.AppEntry(item.pkg, labelOf(item.pkg)))
                     }
                 }
@@ -135,7 +146,7 @@ object HomeLayoutEngine {
             }
         }
         // 新装的应用 / 新加入管控又解除的应用：按名称补到末尾
-        labels.keys.filter { visible.contains(it) && !placed.contains(it) }
+        labels.keys.filter { visible.contains(it) && !placed.contains(it) && !dockSet.contains(it) }
             .sortedBy { labelOf(it).lowercase() }
             .forEach { out.add(LauncherEntry.AppEntry(it, labelOf(it))) }
         return out
@@ -320,6 +331,35 @@ object HomeLayoutEngine {
             )
             layout.copy(items = stripped)
         }
+    }
+    // ---------------- Dock 栏（手机桌面底部固定应用） ----------------
+
+    /** Dock 最多几个 */
+    fun dockMax(): Int = 5
+
+    fun isInDock(layout: HomeLayout, pkg: String): Boolean = layout.dock.contains(pkg)
+
+    /** 拖到 Dock：从桌面/文件夹移出并加到 Dock 末尾；Dock 已满或已在其中则原样返回 */
+    fun moveToDock(layout: HomeLayout, pkg: String): HomeLayout {
+        if (layout.dock.contains(pkg)) return layout
+        if (layout.dock.size >= dockMax()) return layout
+        val stripped = removePkgs(layout.items, setOf(pkg))
+        return layout.copy(items = stripped, dock = layout.dock + pkg)
+    }
+
+    /** 从 Dock 移除：回到桌面，追加到末尾 */
+    fun removeFromDock(layout: HomeLayout, pkg: String): HomeLayout {
+        if (!layout.dock.contains(pkg)) return layout
+        return layout.copy(items = layout.items + HomeItem.AppItem(pkg), dock = layout.dock - pkg)
+    }
+
+    /** Dock 为空时播种几个常用应用（只挑已安装的），符合手机桌面的默认观感 */
+    fun seedDockIfEmpty(layout: HomeLayout, installedCandidates: List<String>): HomeLayout {
+        if (layout.dock.isNotEmpty()) return layout
+        val picked = installedCandidates.distinct().take(dockMax())
+        if (picked.isEmpty()) return layout
+        val stripped = removePkgs(layout.items, picked.toSet())
+        return layout.copy(items = stripped, dock = picked)
     }
     private fun removePkgs(items: List<HomeItem>, pkgs: Set<String>): List<HomeItem> {
         return items.mapNotNull { item ->

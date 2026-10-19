@@ -218,6 +218,62 @@ class HomeLayoutTest {
         val newFolder = merged.items.filterIsInstance<HomeItem.FolderItem>().first { it.folder.id == "f_new" }
         assertEquals(listOf("com.b", "com.h"), newFolder.folder.pkgs)
     }
+    // ---------------- Dock 栏 ----------------
+
+    @Test
+    fun dragAppToDockRemovesItFromGrid() {
+        val layout = HomeLayout(
+            items = listOf(HomeItem.AppItem("com.a"), HomeItem.AppItem("com.b"))
+        )
+        val docked = HomeLayoutEngine.moveToDock(layout, "com.a")
+        assertEquals(listOf("com.a"), docked.dock)
+        assertEquals(1, docked.items.size)
+        assertEquals("com.b", (docked.items[0] as HomeItem.AppItem).pkg)
+        // 网格渲染时 Dock 应用不会再出现（只装 a、b 两个应用的情况下）
+        val small = mapOf("com.a" to "Alpha", "com.b" to "Beta")
+        val entries = HomeLayoutEngine.build(docked, small, setOf("com.a", "com.b"))
+        assertEquals(1, entries.size)
+        assertEquals("com.b", (entries[0] as LauncherEntry.AppEntry).pkg)
+    }
+
+    @Test
+    fun dockIsLimitedToFive() {
+        var layout = HomeLayout()
+        listOf("com.a", "com.b", "com.c", "com.d", "com.e", "com.f").forEach {
+            layout = HomeLayoutEngine.moveToDock(layout, it)
+        }
+        assertEquals(5, layout.dock.size)
+        assertTrue(layout.dock.none { it == "com.f" })
+    }
+
+    @Test
+    fun removeFromDockReturnsToGrid() {
+        val layout = HomeLayout(dock = listOf("com.a"))
+        val back = HomeLayoutEngine.removeFromDock(layout, "com.a")
+        assertTrue(back.dock.isEmpty())
+        assertEquals("com.a", (back.items[0] as HomeItem.AppItem).pkg)
+    }
+
+    @Test
+    fun seedDockOnlyWhenEmpty() {
+        val installed = listOf("com.mm", "com.qq", "com.browser")
+        val seeded = HomeLayoutEngine.seedDockIfEmpty(HomeLayout(), installed)
+        assertEquals(installed, seeded.dock)
+        // 已经有 Dock 时不再播种
+        val again = HomeLayoutEngine.seedDockIfEmpty(seeded, listOf("com.x"))
+        assertEquals(seeded, again)
+    }
+
+    @Test
+    fun dockSurvivesJsonRoundTrip() {
+        val layout = HomeLayout(
+            items = listOf(HomeItem.AppItem("com.a")),
+            wallpaper = "/x/wallpaper.img",
+            dock = listOf("com.x", "com.y")
+        )
+        val back = HomeLayout.fromJson(JSONObject(layout.toJson().toString()))
+        assertEquals(layout, back)
+    }
     @Test
     fun layoutJsonRoundTrip() {
         val layout = HomeLayout(

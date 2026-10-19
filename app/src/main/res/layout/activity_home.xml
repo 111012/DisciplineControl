@@ -101,19 +101,19 @@
             android:overScrollMode="never"
             android:scrollbars="none" />
 
-        <TextView
-            android:id="@+id/tvFooter"
+        <!-- 手机桌面式 Dock 栏：固定常用应用 -->
+        <LinearLayout
+            android:id="@+id/dockBar"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_horizontal"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_chip"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_glass_dock"
             android:gravity="center"
-            android:paddingLeft="14dp"
-            android:paddingTop="6dp"
-            android:paddingRight="14dp"
-            android:paddingBottom="6dp"
-            android:textColor="@color/sub"
-            android:textSize="11sp" />
+            android:orientation="horizontal"
+            android:paddingLeft="12dp"
+            android:paddingTop="8dp"
+            android:paddingRight="12dp"
+            android:paddingBottom="8dp" />
     </LinearLayout>
 </FrameLayout>

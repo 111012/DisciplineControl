@@ -1,4 +1,4 @@
-# 交付说明 · 自律控制（Discipline Control）v0.4.0
+# 交付说明 · 自律控制（Discipline Control）v0.5.0
 
 给小米平板用的**自律 / 家长控制** App：把指定应用（如王者荣耀）从桌面隐藏，只在设定时段可见；限制每日打开次数与单次时长；到点先提醒、再强制退回桌面。所有参数都能在 App 里改，没有写死。
 
@@ -12,8 +12,8 @@
 
 | 文件 | 用途 |
 |---|---|
-| `dist/DisciplineControl-v0.4.0-release.apk` | **日常用**。2.3 MB，无 debuggable、无调试广播 |
-| `dist/DisciplineControl-v0.4.0-debug.apk` | 调试/自动化验收用，带 `am broadcast` 调试命令 |
+| `dist/DisciplineControl-v0.5.0-release.apk` | **日常用**。2.3 MB，无 debuggable、无调试广播 |
+| `dist/DisciplineControl-v0.5.0-debug.apk` | 调试/自动化验收用，带 `am broadcast` 调试命令 |
 
 两者同一签名（`keystore/discipline.jks`），可互相覆盖升级，规则数据不丢。
 
@@ -77,9 +77,10 @@
 
 ## 4.5 桌面外观（液态玻璃 / 拖拽分组 / 壁纸）
 
+- **Dock 栏**：屏幕底部固定的 5 个常用应用（默认微信/QQ/浏览器/文件管理）。**把桌面图标拖到 Dock 上松手**即可加入；长按 Dock 图标 → 从 Dock 移除。
 - **建文件夹**：**长按应用图标 → 拖到另一个应用图标上 → 停一下（目标会高亮放大）→ 松手**，自动创建文件夹并把两个应用收进去。拖到已有文件夹上松手 = 加入该文件夹。
 - **排序**：长按拖动后**快速划过**其它图标（不停留）是移动位置；松手保存新顺序。
-- **菜单**：长按图标**不移动**直接松手 = 原来的菜单（移动到分组 / 应用信息 / 文件夹可重命名解散）。
+- **菜单**：长按图标**不移动**直接松手 = 贴着图标弹出的系统菜单（移动到分组 / 加到 Dock / 应用信息；文件夹可重命名解散）。
 - **壁纸**：设置 → 桌面外观 → 壁纸 → 选择 →（MIUI 会先问"用哪个应用打开"，选**相册**，可勾"下次默认"）→ 选图。壁纸按**原图分辨率**显示（不模糊、不降采样），恢复默认在同页面。
 - **分组管理**：设置 → 桌面外观 → 分组管理，可重命名 / 解散（解散后应用回桌面，管控规则不受影响）。
 
@@ -115,4 +116,4 @@ $env:ANDROID_HOME='<repo>\.toolchain\android-sdk'
 | `scripts/adb-logs.ps1` / `scripts/adb-shot.ps1` | 实时日志 / 截图 |
 
 > 脚本需 `-ExecutionPolicy Bypass`（已存为 UTF-8 BOM）；调试广播仅 debug 包有效。
-> 代码结构、判定逻辑、单测（47 个）见 [README.md](README.md)；变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+> 代码结构、判定逻辑、单测（52 个）见 [README.md](README.md)；变更历史见 [CHANGELOG.md](CHANGELOG.md)。

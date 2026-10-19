@@ -41,6 +41,11 @@ class FolderActivity : AppCompatActivity() {
         refresh()
     }
 
+    override fun finish() {
+        super.finish()
+        overridePendingTransition(R.anim.folder_in, R.anim.folder_out)
+    }
+
     private fun build() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
