@@ -127,7 +127,7 @@ cd D:\DSH_WorkSpace\DisciplineControl
 
 > JUnit 4 的两个 jar 直接放在 `app/libs/`（`junit-4.13.2.jar`、`hamcrest-core-1.3.jar`），不依赖联网解析，避免镜像抽风。
 
-签名：`keystore/discipline.jks`（别名 `discipline`，密码 `***REMOVED***`）。**固定签名**，后续版本可覆盖安装，应用数据不会丢；但 MIUI 在覆盖安装后会把默认桌面重置回小米桌面，升级后必须重设一次（见第七节）。
+签名：本机 `keystore/discipline.jks`（别名 `discipline`）。**密码等签名参数放在不纳入版本库的 `keystore.properties`**：clone 后把 `keystore.properties.example` 复制一份、填真实值即可（没有该文件时构建照常可跑，只是 release 包未签名）。**固定签名**，后续版本可覆盖安装，应用数据不会丢；但 MIUI 在覆盖安装后会把默认桌面重置回小米桌面，升级后必须重设一次（见第七节）。
 
 依赖全部走阿里云 Maven 镜像（见 `settings.gradle.kts`）。
 

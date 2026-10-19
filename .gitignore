@@ -12,3 +12,8 @@ dist/
 
 screenshots/
 
+# 签名材料绝不入库（历史里也已用 git filter-repo 清理）
+keystore/
+keystore.properties
+*.jks
+*.keystore

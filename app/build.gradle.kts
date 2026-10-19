@@ -1,6 +1,17 @@
-﻿plugins {
+import java.util.Properties
+
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// 签名配置从本地的 keystore.properties 读取（该文件不纳入版本库，见根目录 .gitignore）。
+// 没有这个文件时不做签名配置：单测、assembleDebug 等照常可跑，assembleRelease 产出未签名包。
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -16,21 +27,27 @@ android {
     }
 
     signingConfigs {
-        create("appkey") {
-            storeFile = file("../keystore/discipline.jks")
-            storePassword = "***REMOVED***"
-            keyAlias = "discipline"
-            keyPassword = "***REMOVED***"
+        if (keystorePropsFile.exists()) {
+            create("appkey") {
+                storeFile = file(keystoreProps.getProperty("storeFile") ?: "../keystore/discipline.jks")
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("appkey")
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("appkey")
+            }
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("appkey")
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("appkey")
+            }
         }
     }
 
