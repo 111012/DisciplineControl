@@ -371,7 +371,7 @@ class SettingsActivity : AppCompatActivity() {
             Ui.row(
                 this,
                 "壁纸",
-                if (hasWallpaper) "自定义壁纸已开启，会自动模糊成磨砂玻璃" else "默认渐变背景",
+                if (hasWallpaper) "自定义壁纸已开启（按原图分辨率显示，不做模糊）" else "默认渐变背景",
                 "选择"
             ) { pickWallpaper() }
         )

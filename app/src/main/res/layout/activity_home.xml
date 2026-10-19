@@ -91,28 +91,28 @@
                 android:orientation="horizontal" />
         </LinearLayout>
 
-        <GridView
+        <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/grid"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="10dp"
             android:layout_weight="1"
             android:clipToPadding="false"
-            android:horizontalSpacing="6dp"
-            android:numColumns="5"
-            android:stretchMode="columnWidth"
-            android:verticalSpacing="10dp" />
+            android:overScrollMode="never"
+            android:scrollbars="none" />
 
         <TextView
             android:id="@+id/tvFooter"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
             android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
             android:gravity="center"
-            android:shadowColor="#B3FFFFFF"
-            android:shadowDx="0"
-            android:shadowDy="1"
-            android:shadowRadius="3"
+            android:paddingLeft="14dp"
+            android:paddingTop="6dp"
+            android:paddingRight="14dp"
+            android:paddingBottom="6dp"
             android:textColor="@color/sub"
             android:textSize="11sp" />
     </LinearLayout>

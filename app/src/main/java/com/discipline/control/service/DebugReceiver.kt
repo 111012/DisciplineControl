@@ -142,6 +142,34 @@ class DebugReceiver : BroadcastReceiver() {
                 Log.i(TAG, "store cleared")
             }
 
+            // 壁纸调试：把应用私有目录里的图片设为壁纸（配合 adb 推图，免去手点相册）
+            "wallpaper" -> {
+                val name = intent.getStringExtra("file") ?: "test_wallpaper.jpg"
+                val f = java.io.File(context.filesDir, name)
+                if (f.exists() && f.length() > 0) {
+                    Store.saveLayout(Store.layout().copy(wallpaper = f.absolutePath))
+                    Log.i(TAG, "wallpaper set: ${f.absolutePath} (${f.length()} bytes)")
+                } else {
+                    Log.w(TAG, "wallpaper file not found: ${f.absolutePath}")
+                }
+            }
+
+            "clear-wallpaper" -> {
+                Store.saveLayout(Store.layout().copy(wallpaper = ""))
+                Log.i(TAG, "wallpaper cleared")
+            }
+
+            // 重置桌面布局（保留壁纸），用于把拖拽测试弄乱的顺序恢复成默认排序
+            "reset-layout" -> {
+                val wallpaper = Store.layout().wallpaper
+                Store.saveLayout(com.discipline.control.core.HomeLayout(items = emptyList(), wallpaper = wallpaper))
+                Log.i(TAG, "layout reset (wallpaper kept=$wallpaper)")
+            }
+
+            "layout" -> {
+                Log.i(TAG, "layout=${Store.layout().toJson()}")
+            }
+
             "start-service" -> GuardService.startSafely(context)
         }
     }

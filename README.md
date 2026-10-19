@@ -6,8 +6,8 @@
 - 方案：**自建桌面（Launcher）+ 无障碍前台监听 + 前台计时服务**
 - 包名 `com.discipline.control`，`minSdk 26` / `targetSdk 33`，Kotlin + AGP 7.4.2 + Gradle 7.6.4
 
-> **当前状态**：v0.3.0 已在小米平板 6 上完成真机验证（含液态玻璃界面、桌面分组、自定义壁纸），**42 个** JVM 单测全绿。交付速览见 [DELIVERY.md](DELIVERY.md)。
-> 安装包（固定签名，可互相覆盖升级）：`dist/DisciplineControl-v0.3.0-release.apk`（日常用，无 debuggable / 无调试广播）与 `dist/DisciplineControl-v0.3.0-debug.apk`（调试用，带 adb 调试广播）
+> **当前状态**：v0.4.0 已在小米平板 6 上完成真机验证（**拖拽建文件夹**、壁纸原图分辨率、液态玻璃），**47 个** JVM 单测全绿。交付速览见 [DELIVERY.md](DELIVERY.md)。
+> 安装包（固定签名，可互相覆盖升级）：`dist/DisciplineControl-v0.4.0-release.apk`（日常用，无 debuggable / 无调试广播）与 `dist/DisciplineControl-v0.4.0-debug.apk`（调试用，带 adb 调试广播）
 > 首次使用要设 PIN（测试期设的是 `1234`，自己用请改掉：设置 → 修改 PIN）
 > 安装步骤：[docs/平板安装与使用说明.md](docs/平板安装与使用说明.md)
 > 逐项验收：[docs/验收测试清单.md](docs/验收测试清单.md)
@@ -31,8 +31,8 @@
 | 待生效修改 | 涉及**放宽**的修改（调大次数/时长、扩时段、停用管控、移除管控）会延迟 N 小时生效，收紧立即生效 —— 防止一时冲动改掉限制 |
 | PIN 保护 | 进设置页要 PIN；PIN 只存加盐 SHA-256 |
 | 统计 | 最近 7 天每个被管控应用的打开次数与使用时长 |
-| 液态玻璃界面 | 磨砂玻璃卡片 / 高光描边 / 彩色光斑渐变底；设置里可选壁纸（自动模糊成磨砂玻璃） |
-| 桌面分组 | 长按图标 →「移动到分组…」/「新建分组并移入」，分组显示为文件夹格子，原位替换；分组页点图标启动、长按移出 |
+| 液态玻璃界面 | 磨砂玻璃卡片 / 高光描边 / 彩色光斑渐变底；桌面自定义壁纸按**原图分辨率**显示（不模糊、不降采样） |
+| 拖拽建文件夹 | **长按图标拖到另一个图标上松手 → 自动建文件夹收纳两个应用**（悬停 320ms 高亮目标）；拖到已有文件夹 = 加入；快速划过 = 排序；文件夹原位替换 |
 | 分组管理 | 设置 → 桌面外观 → 分组管理：重命名 / 解散（组内应用回桌面） |
 | 保活 | 前台服务 + START_STICKY + 15 分钟 AlarmManager 自拉起 + 开机自启 |
 | 失效告警 | 无障碍被系统关掉（含被"强行停止"）→ 15 秒内发「拦截已失效」通知，常驻通知与桌面变 ⚠；点通知进一键修复页（无需 PIN） |
@@ -73,7 +73,7 @@ app/src/main/java/com/discipline/control/
 │   └── BootReceiver.kt            开机 / 更新后拉起服务
 └── ui/
     ├── HomeActivity.kt            桌面（HOME + LAUNCHER，液态玻璃 / 壁纸 / 长按分组）
-    ├── HomeGridAdapter.kt         网格：应用图标 / 文件夹格子
+    ├── HomeGridAdapter.kt         网格：应用图标 / 文件夹格子（RecyclerView.Adapter + 合并高亮）
     ├── FolderActivity.kt          分组内容页（长按移出）
     ├── GroupManageActivity.kt     分组管理（重命名 / 解散）
     ├── SettingsActivity.kt        设置：权限引导 / 管控列表 / 全局参数 / 待生效 / PIN
@@ -117,7 +117,7 @@ cd D:\DSH_WorkSpace\DisciplineControl
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`（同时拷到 `dist/`）
 
-单元测试（纯 JVM，不需要真机，覆盖时段边界、次数/时长判定、跨零点、放宽判断、会话续接、跨天记账、JSON 往返等 42 个用例：`EngineTest` 25 + `HomeLayoutTest` 11 + `ModelJsonTest` 6，v0.1.8 全绿）：
+单元测试（纯 JVM，不需要真机，覆盖时段边界、次数/时长判定、跨零点、放宽判断、会话续接、跨天记账、JSON 往返等 47 个用例：`EngineTest` 25 + `HomeLayoutTest` 16 + `ModelJsonTest` 6，v0.1.8 全绿）：
 
 ```powershell
 .\.toolchain\gradle-7.6.4\bin\gradle.bat :app:testDebugUnitTest --no-daemon
@@ -209,7 +209,7 @@ adb shell am broadcast -a com.discipline.control.DEBUG -e cmd clear
 | 机型 | 小米平板 6（Xiaomi Pad 6），型号 23043RP34C |
 | 系统 | Android 13 / MIUI V140 |
 | 屏幕 | 1800×2880（横屏 2880×1800），密度 400 |
-| 安装包 | `dist/DisciplineControl-v0.3.0-release.apk`（日常）/ `-debug.apk`（调试，versionCode 12） |
+| 安装包 | `dist/DisciplineControl-v0.4.0-release.apk`（日常）/ `-debug.apk`（调试，versionCode 13） |
 
 > 早期文档按「小米平板 5」编写，实际验证机是 Pad 6；Pad 5 未实测。
 

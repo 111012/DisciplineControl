@@ -5,18 +5,24 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.ImageDecoder
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.GridView
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.RecyclerView
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -51,7 +57,12 @@ import java.util.UUID
 
 class HomeActivity : AppCompatActivity() {
 
-    private lateinit var grid: GridView
+    private lateinit var recycler: RecyclerView
+    private var dragStartKey: String? = null
+    private var dragMoved = false
+    private var mergeTargetKey: String? = null
+    private var hoverKey: String? = null
+    private var hoverSince = 0L
     private lateinit var tvClock: TextView
     private lateinit var tvDate: TextView
     private lateinit var tvStatus: TextView
@@ -87,7 +98,7 @@ class HomeActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_home)
 
-        grid = findViewById(R.id.grid)
+        recycler = findViewById(R.id.grid)
         tvClock = findViewById(R.id.tvClock)
         tvDate = findViewById(R.id.tvDate)
         tvStatus = findViewById(R.id.tvStatus)
@@ -97,21 +108,16 @@ class HomeActivity : AppCompatActivity() {
         vScrim = findViewById(R.id.vScrim)
         val btnSettings: ImageButton = findViewById(R.id.btnSettings)
 
-        adapter = HomeGridAdapter(this)
-        grid.adapter = adapter
-        grid.setOnItemClickListener { _, _, position, _ ->
-            when (val entry = adapter.getItem(position)) {
+        adapter = HomeGridAdapter(this) { entry ->
+            when (entry) {
                 is LauncherEntry.AppEntry -> launchApp(entry.pkg)
                 is LauncherEntry.FolderEntry -> openFolder(entry.id)
             }
         }
-        grid.setOnItemLongClickListener { _, _, position, _ ->
-            when (val entry = adapter.getItem(position)) {
-                is LauncherEntry.AppEntry -> showAppMenu(entry.pkg)
-                is LauncherEntry.FolderEntry -> showFolderMenu(entry.id, entry.name)
-            }
-            true
-        }
+        recycler.layoutManager = GridLayoutManager(this, 5)
+        recycler.addItemDecoration(GridSpacingDecoration(dp(6), dp(10)))
+        recycler.adapter = adapter
+        setupDragAndDrop()
 
         btnSettings.setOnClickListener { Pin.gate(this) { openSettings() } }
         btnSettings.setOnLongClickListener {
@@ -231,7 +237,7 @@ class HomeActivity : AppCompatActivity() {
             tvFooter.text = "${lb.label} 已被拦下：${lb.text}"
             tvFooter.setTextColor(ContextCompat.getColor(this, R.color.warn))
         } else {
-            tvFooter.text = "长按图标可分组 · 长按右上角进系统设置"
+            tvFooter.text = "长按图标拖到另一个图标上即可建文件夹 · 长按松手弹菜单"
             tvFooter.setTextColor(ContextCompat.getColor(this, R.color.sub))
         }
     }
@@ -261,17 +267,21 @@ class HomeActivity : AppCompatActivity() {
     private fun applyWallpaper() {
         val path = Store.layout().wallpaper
         if (path.isEmpty() || !File(path).exists()) {
-            if (loadedWallpaperPath.isNotEmpty()) {
-                wallpaperBitmap = null
-                loadedWallpaperPath = ""
-            }
+            ivWallpaper.setImageDrawable(null)
             ivWallpaper.visibility = View.GONE
             vScrim.visibility = View.GONE
+            loadedWallpaperPath = ""
+            wallpaperBitmap?.let {
+                it.recycle()
+                wallpaperBitmap = null
+            }
             return
         }
         if (path != loadedWallpaperPath || wallpaperBitmap == null) {
+            val old = wallpaperBitmap
             wallpaperBitmap = decodeWallpaper(path)
             loadedWallpaperPath = path
+            if (old != null && old !== wallpaperBitmap) old.recycle()
         }
         val bmp = wallpaperBitmap
         if (bmp == null) {
@@ -281,31 +291,224 @@ class HomeActivity : AppCompatActivity() {
         }
         ivWallpaper.setImageBitmap(bmp)
         ivWallpaper.visibility = View.VISIBLE
-        vScrim.visibility = View.VISIBLE
+        // 壁纸不打折扣：不再整屏压暗/模糊，文字靠玻璃卡片和柔光阴影保证可读
+        vScrim.visibility = View.GONE
     }
 
     /**
-     * 壁纸按"液态玻璃"处理：降采样 + 缩到极小再放大（任何 API 都能用的磨砂模糊），
-     * 输出约 1000px 宽，既省内存（原图 1800x2880 ARGB 要 20MB+）又有磨砂质感。
+     * 壁纸按原图质量解码，**不模糊**。
+     * API 28+ 用 ImageDecoder 直接按"覆盖屏幕"的尺寸高质量缩放（一次解码、内存可控、不会先解小图再放大 → 不糊）；
+     * 低版本退回 BitmapFactory + 整数降采样。
      */
     private fun decodeWallpaper(path: String): Bitmap? = runCatching {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(path, bounds)
-        var sample = 1
-        while (bounds.outWidth / sample > 1200 || bounds.outHeight / sample > 1200) sample *= 2
-        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        val src = BitmapFactory.decodeFile(path, opts) ?: return@runCatching null
-        val tinyW = (src.width / 12).coerceAtLeast(16)
-        val tinyH = (src.height / 12).coerceAtLeast(16)
-        val tiny = Bitmap.createScaledBitmap(src, tinyW, tinyH, true)
-        val outW = src.width.coerceAtMost(1000)
-        val outH = (src.height * outW / src.width).coerceAtLeast(1)
-        val blurred = Bitmap.createScaledBitmap(tiny, outW, outH, true)
-        if (tiny !== src) tiny.recycle()
-        src.recycle()
-        blurred
+        val dm = resources.displayMetrics
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val source = ImageDecoder.createSource(File(path))
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                val w = info.size.width
+                val h = info.size.height
+                if (w <= 0 || h <= 0) return@decodeBitmap
+                // 缩放到"刚好覆盖屏幕"，多余部分交给 ImageView 的 centerCrop 裁掉
+                val cover = maxOf(dm.widthPixels.toFloat() / w, dm.heightPixels.toFloat() / h)
+                var tw = (w * cover).toInt().coerceAtLeast(1)
+                var th = (h * cover).toInt().coerceAtLeast(1)
+                // 内存上限 8MP（约 32MB），超出时等比缩小；仍远高于屏幕像素
+                val maxPx = 8_000_000.0
+                val px = tw.toDouble() * th
+                if (px > maxPx) {
+                    val k = Math.sqrt(maxPx / px)
+                    tw = (tw * k).toInt().coerceAtLeast(1)
+                    th = (th * k).toInt().coerceAtLeast(1)
+                }
+                decoder.setTargetSize(tw, th)
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.isMutableRequired = false
+            }
+        } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+            var sample = 1
+            while ((bounds.outWidth / sample).toLong() * (bounds.outHeight / sample) > 8_000_000L) {
+                sample *= 2
+            }
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            BitmapFactory.decodeFile(path, opts)
+        }
     }.getOrNull()
 
+    // ---------------- 拖拽建文件夹 / 拖拽排序 ----------------
+
+    /**
+     * ItemTouchHelper 实现"长按拖动"，判定方式参考 AOSP Launcher3：
+     * 1. 命中检测用被拖 item 的**视觉中心**到格子中心的距离，半径约 0.45 格宽
+     *    （不用 findChildViewUnder：它按未平移的布局坐标命中，拖起来后不可靠）
+     * 2. 悬停超过 MERGE_DWELL_MS 才算"要合并"并高亮目标；快速划过仍然走排序
+     * 3. 松手时：有合并目标 → 建文件夹/加入；没移动 → 弹长按菜单；否则 → 落排序
+     */
+    private fun setupDragAndDrop() {
+        val callback = object : ItemTouchHelper.Callback() {
+            override fun getMovementFlags(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder
+            ): Int = makeMovementFlags(
+                ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT,
+                0
+            )
+
+            override fun isLongPressDragEnabled(): Boolean = true
+
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val from = viewHolder.bindingAdapterPosition
+                val to = target.bindingAdapterPosition
+                if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false
+                // 已经判定为"要合并"时不再交换，等松手建文件夹
+                if (mergeTargetKey != null) return false
+                adapter.moveItem(from, to)
+                dragMoved = true
+                return true
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
+
+            override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
+                super.onSelectedChanged(viewHolder, actionState)
+                if (actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
+                    dragStartKey = viewHolder?.let { adapter.itemAt(it.bindingAdapterPosition)?.key }
+                    dragMoved = false
+                    mergeTargetKey = null
+                    hoverKey = null
+                    hoverSince = 0L
+                }
+            }
+
+            override fun onChildDraw(
+                c: Canvas,
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                dX: Float,
+                dY: Float,
+                actionState: Int,
+                isCurrentlyActive: Boolean
+            ) {
+                super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
+                if (!isCurrentlyActive) return
+                val dragged = adapter.itemAt(viewHolder.bindingAdapterPosition) ?: return
+                val view = viewHolder.itemView
+                // 文件夹只支持排序，不参与合并
+                if (dragged !is LauncherEntry.AppEntry) {
+                    if (mergeTargetKey != null) {
+                        mergeTargetKey = null
+                        adapter.setMergeTarget(null)
+                    }
+                    return
+                }
+                val cx = view.left + dX + view.width / 2f
+                val cy = view.top + dY + view.height / 2f
+                val hit = hitTestTarget(recyclerView, view, cx, cy)
+                val now = SystemClock.uptimeMillis()
+                if (hit != hoverKey) {
+                    hoverKey = hit
+                    hoverSince = now
+                }
+                val dwellDone = hit != null && now - hoverSince >= MERGE_DWELL_MS
+                val desired = if (dwellDone) hit else null
+                if (desired != mergeTargetKey) {
+                    mergeTargetKey = desired
+                    adapter.setMergeTarget(desired)
+                }
+            }
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                val moved = dragMoved
+                val targetKey = mergeTargetKey
+                val startKey = dragStartKey
+                dragMoved = false
+                mergeTargetKey = null
+                hoverKey = null
+                hoverSince = 0L
+                dragStartKey = null
+                adapter.setMergeTarget(null)
+                val current = startKey?.let { k -> adapter.entries().firstOrNull { it.key == k } }
+                    ?: adapter.entries().getOrNull(viewHolder.bindingAdapterPosition)
+                when {
+                    current == null -> Unit
+                    targetKey != null && current is LauncherEntry.AppEntry -> mergeAppInto(current.pkg, targetKey)
+                    !moved && current is LauncherEntry.AppEntry -> showAppMenu(current.pkg)
+                    !moved && current is LauncherEntry.FolderEntry -> showFolderMenu(current.id, current.name)
+                    else -> persistDisplayOrder()
+                }
+            }
+        }
+        ItemTouchHelper(callback).attachToRecyclerView(recycler)
+    }
+
+    /** 拖拽视觉中心命中的目标 key（半径约 0.45 格宽，参考 Launcher3 的 folderCreationRadius） */
+    private fun hitTestTarget(
+        recyclerView: RecyclerView,
+        draggedView: View,
+        cx: Float,
+        cy: Float
+    ): String? {
+        for (i in 0 until recyclerView.childCount) {
+            val child = recyclerView.getChildAt(i)
+            if (child === draggedView) continue
+            val dx = cx - (child.left + child.width / 2f)
+            val dy = cy - (child.top + child.height / 2f)
+            val radius = child.width * 0.45f
+            if (dx * dx + dy * dy > radius * radius) continue
+            val position = recyclerView.getChildAdapterPosition(child)
+            if (position == RecyclerView.NO_POSITION) continue
+            return adapter.itemAt(position)?.key
+        }
+        return null
+    }
+    /** 把 [draggedPkg] 合并到 [targetKey]：目标是应用 → 新建文件夹；目标是文件夹 → 加入 */
+    private fun mergeAppInto(draggedPkg: String, targetKey: String) {
+        val folderId = "f_" + UUID.randomUUID().toString().take(6)
+        val merged = HomeLayoutEngine.mergeIntoFolder(editableLayout(), draggedPkg, targetKey, folderId, "文件夹")
+        Store.saveLayout(merged)
+        refresh()
+        Toast.makeText(
+            this,
+            if (targetKey.startsWith("f:")) "已加入文件夹" else "已创建文件夹",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    /** 拖拽排序落地：把当前展示顺序写回布局（被隐藏的条目位置不变） */
+    private fun persistDisplayOrder() {
+        val keys = adapter.entries().map { it.key }
+        Store.saveLayout(HomeLayoutEngine.applyDisplayOrder(Store.layout(), keys))
+        refresh()
+    }
+
+    /** RecyclerView 网格间距（替代原来 GridView 的 horizontalSpacing/verticalSpacing） */
+    private companion object {
+        /** 悬停多久才算"要合并"（毫秒）；快速划过仍然走排序 */
+        const val MERGE_DWELL_MS = 320L
+    }
+    private class GridSpacingDecoration(private val h: Int, private val v: Int) : RecyclerView.ItemDecoration() {
+        override fun getItemOffsets(
+            outRect: Rect,
+            view: View,
+            parent: RecyclerView,
+            state: RecyclerView.State
+        ) {
+            outRect.left = h / 2
+            outRect.right = h / 2
+            outRect.top = v / 2
+            outRect.bottom = v / 2
+        }
+    }
     // ---------------- 长按菜单 ----------------
 
     private fun showAppMenu(pkg: String) {

@@ -11,8 +11,8 @@ android {
         applicationId = "com.discipline.control"
         minSdk = 26
         targetSdk = 33
-        versionCode = 12
-        versionName = "0.3.0"
+        versionCode = 13
+        versionName = "0.4.0"
     }
 
     signingConfigs {
@@ -59,6 +59,7 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.9.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.recyclerview:recyclerview:1.3.0")
     testImplementation(
         files(
             "libs/junit-4.13.2.jar",

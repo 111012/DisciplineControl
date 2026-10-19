@@ -3,10 +3,33 @@
 版本号对应 `app/build.gradle.kts` 的 `versionName` / `versionCode`。
 
 > v0.1.0–v0.2.0 **均已提交**。v0.1.4–v0.1.8 同属提交 `323c556`「v0.1.4-v0.1.8: 真机修复轮（含代码审查发现的 P0/P1）」，v0.2.0 为后续提交。
-> 当前版本 **v0.3.0 / versionCode 12**，产物 `dist/DisciplineControl-v0.3.0-release.apk`（日常用）/ `dist/DisciplineControl-v0.3.0-debug.apk`（调试用）。
+> 当前版本 **v0.4.0 / versionCode 13**，产物 `dist/DisciplineControl-v0.4.0-release.apk`（日常用）/ `dist/DisciplineControl-v0.4.0-debug.apk`（调试用）。
 
 ---
 
+## v0.4.0 — 2026-10-19（versionCode 13）
+
+桌面交互对齐 iOS/安卓桌面：拖拽建文件夹 + 壁纸原图分辨率。
+
+### 新增
+
+- **长按拖拽建文件夹**：长按应用图标进入拖拽 → 拖到另一个应用图标上悬停 320ms（目标高亮 + 放大 1.08）→ 松手自动创建文件夹并把两个应用收纳进去，文件夹出现在目标位置；拖到已有文件夹上松手 = 加入该文件夹；长按不移动直接松手 = 原来的一键菜单；拖拽过程中可排序
+- **拖拽排序**：快速划过图标（不悬停）→ 走 ItemTouchHelper 的 `onMove` 交换，松手后顺序写回布局（`HomeLayoutEngine.applyDisplayOrder`，被规则隐藏的条目位置不变）
+- **壁纸改为原图分辨率**：`ImageDecoder`（API 28+）按"覆盖屏幕"尺寸高质量缩放，一次解码、不再"解码小图再放大"，屏幕上是原图清晰度（上限 8MP ≈32MB 内存）；去掉整屏白色遮罩，文字靠玻璃卡片 + 柔光阴影保证可读
+- 玻璃头部提高不透明度、底部提示改成玻璃胶囊，高亮壁纸上文字也清楚
+
+### 技术选型（先调研再动手）
+
+- 参考 AOSP Launcher3 的拖拽架构：[DragController](https://android.googlesource.com/platform/packages/apps/Launcher3/+/refs/heads/main/src/com/android/launcher3/dragndrop/DragController.java)、[Workspace](https://android.googlesource.com/platform/packages/apps/Launcher3/+/refs/heads/main/src/com/android/launcher3/Workspace.java)（`DRAG_MODE_CREATE_FOLDER / ADD_TO_FOLDER / REORDER` 三态 + `getFolderCreationRadius` 命中判定）、[FolderIcon](https://android.googlesource.com/platform/packages/apps/Launcher3/+/refs/heads/main/src/com/android/launcher3/folder/FolderIcon.java)
+- 官方 [ItemTouchHelper](https://developer.android.google.cn/reference/androidx/recyclerview/widget/ItemTouchHelper) 提供长按起拖、回弹动画、边缘自动滚动；"合并"语义需自写 Callback
+- 现成库调研结论：没有能直接用且维护良好的"拖拽合并建文件夹"库；[DSAppTeam/RecyclerViewDrag](https://github.com/DSAppTeam/RecyclerViewDrag)（49★，2023 停更）可参考思路，`android-advancedrecyclerview` 等只做排序不含合并 → 自写，约 400 行
+
+### 实现
+
+- 桌面网格 `GridView` → `RecyclerView` + `GridLayoutManager`（新增 `androidx.recyclerview:recyclerview:1.3.0` 依赖）
+- `HomeGridAdapter` 改为 `RecyclerView.Adapter`，支持合并目标高亮
+- 命中检测用**拖拽视觉中心到格子中心的距离**（半径 0.45 格宽），不用 `findChildViewUnder`（其按未平移坐标命中，拖起来后不可靠）
+- `HomeLayoutEngine` 新增纯函数：`keyOf` / `moveItem` / `applyDisplayOrder` / `mergeIntoFolder`，并加 5 个单测（含"从文件夹里拖出来再合并"）
 ## v0.3.0 — 2026-10-19（versionCode 12）
 
 桌面外观重做：液态玻璃 + 分组 + 壁纸。

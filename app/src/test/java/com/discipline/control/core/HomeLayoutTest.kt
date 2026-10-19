@@ -143,6 +143,81 @@ class HomeLayoutTest {
         )
     }
 
+    // ---------------- 拖拽排序 / 拖拽建文件夹 ----------------
+
+    @Test
+    fun moveItemReordersDesktop() {
+        var layout = HomeLayout(
+            items = listOf(HomeItem.AppItem("com.a"), HomeItem.AppItem("com.b"), HomeItem.AppItem("com.c"))
+        )
+        layout = HomeLayoutEngine.moveItem(layout, "a:com.a", "a:com.c")
+        assertEquals(
+            listOf("com.b", "com.c", "com.a"),
+            layout.items.map { (it as HomeItem.AppItem).pkg }
+        )
+        // 未知 key 不动
+        assertEquals(layout, HomeLayoutEngine.moveItem(layout, "a:nope", "a:com.b"))
+    }
+
+    @Test
+    fun applyDisplayOrderKeepsHiddenSlots() {
+        val hidden = HomeItem.AppItem("com.hidden")
+        val layout = HomeLayout(
+            items = listOf(HomeItem.AppItem("com.a"), hidden, HomeItem.AppItem("com.b"))
+        )
+        // 显示的只有 com.b、com.a（com.hidden 被规则隐藏），拖拽后顺序变成 b,a
+        val after = HomeLayoutEngine.applyDisplayOrder(layout, listOf("a:com.b", "a:com.a"))
+        assertEquals(
+            listOf("a:com.b", "a:com.hidden", "a:com.a"),
+            after.items.map { HomeLayoutEngine.keyOf(it) }
+        )
+    }
+
+    @Test
+    fun dragAppOntoAppCreatesFolderAtTargetSlot() {
+        val layout = HomeLayout(
+            items = listOf(HomeItem.AppItem("com.a"), HomeItem.AppItem("com.b"), HomeItem.AppItem("com.c"))
+        )
+        // 把 com.a 拖到 com.b 上松手
+        val merged = HomeLayoutEngine.mergeIntoFolder(layout, "com.a", "a:com.b", "f_new", "文件夹")
+        assertEquals(2, merged.items.size)
+        // 拖拽项被摘除后，目标应用前移一位，文件夹落在目标位置
+        val folder = merged.items[0] as HomeItem.FolderItem
+        assertEquals("f_new", folder.folder.id)
+        assertEquals("文件夹", folder.folder.name)
+        assertEquals(listOf("com.b", "com.a"), folder.folder.pkgs)
+        // 被拖的应用不会在桌面重复出现
+        assertTrue(merged.items.none { it is HomeItem.AppItem && it.pkg == "com.a" })
+    }
+
+    @Test
+    fun dragAppOntoFolderAppends() {
+        val layout = HomeLayout(
+            items = listOf(
+                HomeItem.FolderItem(HomeFolder("f1", "游戏", listOf("com.a"))),
+                HomeItem.AppItem("com.b")
+            )
+        )
+        val merged = HomeLayoutEngine.mergeIntoFolder(layout, "com.b", "f:f1", "f_new", "文件夹")
+        assertEquals(1, merged.items.size)
+        assertEquals(listOf("com.a", "com.b"), (merged.items[0] as HomeItem.FolderItem).folder.pkgs)
+    }
+
+    @Test
+    fun dragAppFromFolderOutToAnotherApp() {
+        val layout = HomeLayout(
+            items = listOf(
+                HomeItem.FolderItem(HomeFolder("f1", "旧组", listOf("com.a", "com.h"))),
+                HomeItem.AppItem("com.b")
+            )
+        )
+        // 把已经在文件夹里的 com.h 拖到 com.b 上 → 新文件夹里只有 b 和 h，旧文件夹只剩 a
+        val merged = HomeLayoutEngine.mergeIntoFolder(layout, "com.h", "a:com.b", "f_new", "文件夹")
+        val oldFolder = merged.items.filterIsInstance<HomeItem.FolderItem>().first { it.folder.id == "f1" }
+        assertEquals(listOf("com.a"), oldFolder.folder.pkgs)
+        val newFolder = merged.items.filterIsInstance<HomeItem.FolderItem>().first { it.folder.id == "f_new" }
+        assertEquals(listOf("com.b", "com.h"), newFolder.folder.pkgs)
+    }
     @Test
     fun layoutJsonRoundTrip() {
         val layout = HomeLayout(

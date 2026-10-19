@@ -247,6 +247,80 @@ object HomeLayoutEngine {
         return layout.copy(items = items)
     }
 
+    /** 布局条目的稳定 key（拖拽/排序用）：应用 a:pkg，文件夹 f:id */
+    fun keyOf(item: HomeItem): String = when (item) {
+        is HomeItem.AppItem -> "a:" + item.pkg
+        is HomeItem.FolderItem -> "f:" + item.folder.id
+    }
+
+    /** 拖拽排序：把 [fromKey] 移到 [toKey] 的位置（被隐藏/未显示的条目保持原位） */
+    fun moveItem(layout: HomeLayout, fromKey: String, toKey: String): HomeLayout {
+        val list = layout.items.toMutableList()
+        val from = list.indexOfFirst { keyOf(it) == fromKey }
+        val to = list.indexOfFirst { keyOf(it) == toKey }
+        if (from < 0 || to < 0 || from == to) return layout
+        val item = list.removeAt(from)
+        list.add(to, item)
+        return layout.copy(items = list)
+    }
+
+    /** 拖拽结束后的展示顺序写回布局（同样只重排"显示的条目"，隐藏的留在原位） */
+    fun applyDisplayOrder(layout: HomeLayout, orderedKeys: List<String>): HomeLayout {
+        val byKey = HashMap<String, HomeItem>()
+        layout.items.forEach { byKey[keyOf(it)] = it }
+        val displayed = orderedKeys.mapNotNull { byKey[it] }
+        if (displayed.isEmpty()) return layout
+        val displayedKeys = displayed.map { keyOf(it) }.toSet()
+        val out = ArrayList<HomeItem>(layout.items.size)
+        var di = 0
+        for (item in layout.items) {
+            if (displayedKeys.contains(keyOf(item))) {
+                if (di < displayed.size) out.add(displayed[di++])
+            } else {
+                out.add(item)
+            }
+        }
+        while (di < displayed.size) out.add(displayed[di++])
+        return layout.copy(items = out)
+    }
+
+    /**
+     * 拖拽合并：把 [draggedPkg] 拖到 [targetKey] 上松手。
+     * - 目标是应用：在目标位置新建文件夹（目标应用 + 拖拽应用）
+     * - 目标是文件夹：直接把拖拽应用加进去
+     */
+    fun mergeIntoFolder(
+        layout: HomeLayout,
+        draggedPkg: String,
+        targetKey: String,
+        newFolderId: String,
+        newFolderName: String
+    ): HomeLayout {
+        val stripped = ArrayList<HomeItem>()
+        layout.items.forEach { item ->
+            when (item) {
+                is HomeItem.AppItem -> if (item.pkg != draggedPkg) stripped.add(item)
+                is HomeItem.FolderItem -> {
+                    val left = item.folder.pkgs.filter { it != draggedPkg }
+                    if (left.isNotEmpty()) stripped.add(HomeItem.FolderItem(item.folder.copy(pkgs = left)))
+                }
+            }
+        }
+        val targetIndex = stripped.indexOfFirst { keyOf(it) == targetKey }
+        if (targetIndex < 0) return layout
+        val target = stripped[targetIndex]
+        return if (target is HomeItem.FolderItem) {
+            stripped[targetIndex] =
+                HomeItem.FolderItem(target.folder.copy(pkgs = target.folder.pkgs + draggedPkg))
+            layout.copy(items = stripped)
+        } else {
+            val targetPkg = (target as HomeItem.AppItem).pkg
+            stripped[targetIndex] = HomeItem.FolderItem(
+                HomeFolder(newFolderId, newFolderName, listOf(targetPkg, draggedPkg))
+            )
+            layout.copy(items = stripped)
+        }
+    }
     private fun removePkgs(items: List<HomeItem>, pkgs: Set<String>): List<HomeItem> {
         return items.mapNotNull { item ->
             when (item) {
